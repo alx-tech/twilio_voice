@@ -7,14 +7,12 @@ package com.twilio.twilio_voice.service
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import android.telecom.CallAudioState
-import android.telecom.Connection
 import android.telecom.DisconnectCause
 import android.util.Log
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import com.twilio.twilio_voice.audio.TVAudioManager
 import com.twilio.twilio_voice.call.TVParameters
 import com.twilio.twilio_voice.receivers.TVBroadcastReceiver
-import com.twilio.twilio_voice.types.CallAudioStateExtension.copyWith
 import com.twilio.twilio_voice.types.CallDirection
 import com.twilio.twilio_voice.types.CallExceptionExtension.toBundle
 import com.twilio.twilio_voice.types.CompletionHandler
@@ -44,9 +42,8 @@ class TVCallInviteConnection(
         setCallParameters(callParams)
     }
 
-    override fun onAnswer() {
+    fun onAnswer() {
         Log.d(TAG, "onAnswer: onAnswer")
-        super.onAnswer()
         twilioCall = callInvite.accept(context, this)
         onAction?.onChange(TVNativeCallActions.ACTION_ANSWERED, Bundle().apply {
             putParcelable(TVBroadcastReceiver.EXTRA_CALL_INVITE, callInvite)
@@ -64,9 +61,8 @@ class TVCallInviteConnection(
         onReject()
     }
 
-    override fun onReject() {
+    fun onReject() {
         Log.d(TAG, "onReject: onReject")
-        super.onReject()
         callInvite.reject(context)
         // if the call was answered, then immediately rejected/ended, we need to disconnect the call also
         twilioCall?.let {
@@ -77,7 +73,6 @@ class TVCallInviteConnection(
         onDisconnected?.withValue(DisconnectCause(DisconnectCause.REJECTED))
         onAction?.onChange(TVNativeCallActions.ACTION_REJECTED, null)
         setDisconnected(DisconnectCause(DisconnectCause.REJECTED))
-        destroy()
     }
 }
 
@@ -86,7 +81,16 @@ open class TVCallConnection(
     onEvent: ValueBundleChanged<String>? = null,
     onAction: ValueBundleChanged<String>? = null,
     onDisconnected: CompletionHandler<DisconnectCause>? = null,
-) : Connection(), Call.Listener {
+) : Call.Listener {
+
+    companion object {
+        const val STATE_NEW = 0
+        const val STATE_RINGING = 1
+        const val STATE_DIALING = 2
+        const val STATE_ACTIVE = 3
+        const val STATE_HOLDING = 4
+        const val STATE_DISCONNECTED = 5
+    }
 
     open val TAG = "VoipConnection"
     val context: Context
@@ -98,13 +102,18 @@ open class TVCallConnection(
     open val callDirection = CallDirection.OUTGOING
     private var callParams: TVParameters? = null
 
+    var state: Int = STATE_NEW
+        private set
+
+    var extras: Bundle = Bundle()
+    var callerDisplayName: String? = null
+    private var isMuted: Boolean = false
+
     init {
         context = ctx
         this.onDisconnected = onDisconnected
         this.onEvent = onEvent
         this.onAction = onAction
-        audioModeIsVoip = true
-        connectionCapabilities = CAPABILITY_MUTE or CAPABILITY_HOLD or CAPABILITY_SUPPORT_HOLD
     }
 
     fun setOnCallDisconnected(handler: CompletionHandler<DisconnectCause>) {
@@ -130,6 +139,35 @@ open class TVCallConnection(
     fun getCallParameters(): TVParameters? {
         return callParams
     }
+
+    //region Connection state transitions (formerly android.telecom.Connection)
+    fun setInitializing() {
+        state = STATE_NEW
+    }
+
+    fun setInitialized() {
+        state = STATE_DIALING
+    }
+
+    fun setRinging() {
+        state = STATE_RINGING
+    }
+
+    fun setActive() {
+        state = STATE_ACTIVE
+        TVAudioManager.getInstance(context).onCallActive()
+        broadcastAudioState()
+    }
+
+    fun setOnHold() {
+        state = STATE_HOLDING
+    }
+
+    fun setDisconnected(cause: DisconnectCause) {
+        state = STATE_DISCONNECTED
+        TVAudioManager.getInstance(context).onCallEnded()
+    }
+    //endregion
 
     //region Call.Listener
     /**
@@ -221,7 +259,7 @@ open class TVCallConnection(
             putString(TVBroadcastReceiver.EXTRA_CALL_FROM, callParams?.fromRaw)
             putString(TVBroadcastReceiver.EXTRA_CALL_TO, callParams?.toRaw)
             putInt(TVBroadcastReceiver.EXTRA_CALL_DIRECTION, callDirection.id)
-            putExtras(callException.toBundle())
+            putAll(callException.toBundle())
         })
     }
 
@@ -248,42 +286,22 @@ open class TVCallConnection(
         twilioCall = null
         onCallStateListener?.withValue(call.state)
         onEvent?.onChange(TVNativeCallEvents.EVENT_DISCONNECTED_REMOTE, Bundle().apply {
-            reason?.toBundle()?.let { putExtras(it) }
+            reason?.toBundle()?.let { putAll(it) }
         })
         setDisconnected(DisconnectCause(DisconnectCause.REMOTE))
         onDisconnected?.withValue(DisconnectCause(DisconnectCause.REMOTE))
-        destroy()
     }
     //endregion
 
-    override fun onAbort() {
-        super.onAbort()
+    fun onAbort() {
         Log.i(TAG, "onAbort: onAbort")
         twilioCall?.disconnect()
         setDisconnected(DisconnectCause(DisconnectCause.CANCELED))
         onAction?.onChange(TVNativeCallActions.ACTION_ABORT, null)
         onDisconnected?.withValue(DisconnectCause(DisconnectCause.CANCELED))
-        destroy()
     }
 
-    override fun onDisconnect() {
-        super.onDisconnect()
-        Log.i(TAG, "onDisconnect: onDisconnect")
-        twilioCall?.disconnect()
-        setDisconnected(DisconnectCause(DisconnectCause.LOCAL))
-        this.onDisconnected?.withValue(DisconnectCause(DisconnectCause.LOCAL))
-        onEvent?.onChange(TVNativeCallEvents.EVENT_DISCONNECTED_LOCAL, null)
-        destroy()
-        // TODO - ACTION_END_CALL
-//        val myIntent: Intent = Intent(context, IncomingCallNotificationService::class.java)
-//        myIntent.action = Constants.ACTION_END_CALL
-//        myIntent.putExtra(Constants.INCOMING_CALL_INVITE, getCallInvite())
-//        myIntent.putExtra(Constants.INCOMING_CALL_NOTIFICATION_ID, getNotificationId())
-//        context.startService(myIntent)
-    }
-
-    override fun onHold() {
-        super.onHold()
+    fun onHold() {
         Log.i(TAG, "onHold: onHold")
         twilioCall?.hold(true)
         setOnHold()
@@ -296,8 +314,7 @@ open class TVCallConnection(
         }
     }
 
-    override fun onUnhold() {
-        super.onUnhold()
+    fun onUnhold() {
         Log.i(TAG, "onUnhold: onUnhold")
         twilioCall?.hold(false)
         setActive()
@@ -308,101 +325,6 @@ open class TVCallConnection(
         }.also {
             sendBroadcast(context, it)
         }
-    }
-
-    override fun onPlayDtmfTone(c: Char) {
-        super.onPlayDtmfTone(c)
-        Log.i(TAG, "onPlayDtmfTone: dtmf tone: $c")
-        twilioCall?.sendDigits(c.toString())
-        onAction?.onChange(TVNativeCallActions.ACTION_DTMF, Bundle().apply {
-            putString(TVNativeCallActions.EXTRA_DTMF_TONE, c.toString())
-        })
-    }
-
-    override fun onExtrasChanged(extras: Bundle?) {
-        super.onExtrasChanged(extras)
-        Log.i(TAG, "onExtrasChanged: onExtrasChanged " + extras.toString())
-        extras?.let {
-            val set = it.keySet()
-            set.forEach {
-                Log.i(TAG, "extra: $it")
-            }
-//            setCallerDisplayName()
-        }
-    }
-
-    override fun onAnswer(videoState: Int) {
-        super.onAnswer(videoState)
-        Log.d(TAG, "onAnswer: onAnswer")
-    }
-
-    override fun onReject(rejectReason: Int) {
-        Log.d(TAG, "onReject: onReject $rejectReason")
-        super.onReject(rejectReason)
-        twilioCall?.disconnect()
-        onAction?.onChange(TVNativeCallActions.ACTION_REJECTED, null)
-    }
-
-    override fun onReject(replyMessage: String?) {
-        Log.d(TAG, "onReject: onReject $replyMessage")
-        super.onReject(replyMessage)
-        twilioCall?.disconnect()
-        onAction?.onChange(TVNativeCallActions.ACTION_REJECTED, Bundle().apply {
-            putString(TVNativeCallActions.EXTRA_REJECT_REASON, replyMessage)
-        })
-    }
-
-    @Suppress("DEPRECATION")
-    @Deprecated("Deprecated in Java")
-    override fun onCallAudioStateChanged(state: CallAudioState?) {
-        Log.d(TAG, "onCallAudioStateChanged: onCallAudioStateChanged ${state.toString()}")
-        super.onCallAudioStateChanged(state)
-
-        Intent(TVBroadcastReceiver.ACTION_AUDIO_STATE).apply {
-            putExtra(TVBroadcastReceiver.EXTRA_AUDIO_STATE, state)
-        }.also {
-            sendBroadcast(context, it)
-        }
-    }
-
-    override fun onStateChanged(state: Int) {
-        super.onStateChanged(state)
-        Log.d(TAG, "onStateChanged: $state")
-//        when (state) {
-//            STATE_ACTIVE -> {
-//                Log.d(TAG, "onStateChanged: STATE_ACTIVE")
-//                setActive()
-//            }
-//
-//            STATE_DIALING -> {
-//                Log.d(TAG, "onStateChanged: STATE_DIALING")
-//                setDialing()
-//            }
-//
-//            STATE_DISCONNECTED -> {
-//                Log.d(TAG, "onStateChanged: STATE_DISCONNECTED")
-//                destroy()
-//            }
-//
-//            STATE_HOLDING -> {
-//                Log.d(TAG, "onStateChanged: STATE_HOLDING")
-//                setOnHold()
-//            }
-//
-//            STATE_NEW -> {
-//                Log.d(TAG, "onStateChanged: STATE_NEW")
-//                setRinging()
-//            }
-//
-//            STATE_RINGING -> {
-//                Log.d(TAG, "onStateChanged: STATE_RINGING")
-//                setRinging()
-//            }
-//
-//            else -> {
-//                Log.d(TAG, "onStateChanged: STATE_UNKNOWN")
-//            }
-//        }
     }
 
     fun toggleHold(newState: Boolean) {
@@ -416,20 +338,12 @@ open class TVCallConnection(
     /**
      * Toggle mute state of the call.
      * @param newState: true to mute, false to unmute
-     * Note: [getCallAudioState] and [onCallAudioStateChanged] has been deprecated in API 34,
-     * however this will be used until [getCurrentCallEndpoint], [onCallEndpointChanged] and [onMuteStateChanged] has been implemented.
      */
-    @Suppress("DEPRECATION")
     fun toggleMute(newState: Boolean) {
-        //TODO(cybex-dev) implement API 34 endpoint & mute state change listeners
         twilioCall?.let {
             it.mute(newState)
-            callAudioState?.let { a ->
-                val newAudioRoute = a.copyWith(newState)
-                onCallAudioStateChanged(newAudioRoute)
-            } ?: run {
-                Log.e(TAG, "toggleMute: Unable to toggle mute, callAudioState is null")
-            }
+            isMuted = newState
+            broadcastAudioState()
         } ?: run {
             Log.e(TAG, "toggleMute: Unable to toggle mute, active call is null")
         }
@@ -440,7 +354,8 @@ open class TVCallConnection(
      * @param newState: true if speaker is enabled, false if speaker is disabled
      */
     fun toggleSpeaker(newState: Boolean) {
-        toggleAudioRoute(CallAudioState.ROUTE_SPEAKER, newState)
+        TVAudioManager.getInstance(context).setSpeakerphone(newState)
+        broadcastAudioState()
     }
 
     /**
@@ -448,29 +363,18 @@ open class TVCallConnection(
      * @param newState: true if bluetooth is enabled, false if bluetooth is disabled
      */
     fun toggleBluetooth(newState: Boolean) {
-        toggleAudioRoute(CallAudioState.ROUTE_BLUETOOTH, newState)
+        TVAudioManager.getInstance(context).setBluetooth(newState)
+        broadcastAudioState()
     }
 
-    /**
-     * Toggle audio route of the call.
-     * @param newAudioRoute: the new audio route to set
-     * @param condition: true to use [newAudioRoute], false to use [fallback]
-     * @param fallback: the fallback audio route to use if [condition] is false
-     *
-     * Note: [getCallAudioState] and [onCallAudioStateChanged] has been deprecated in API 34,
-     * however this will be used until [getCurrentCallEndpoint], [onCallEndpointChanged] and [onMuteStateChanged] has been implemented.
-     */
-    @Suppress("DEPRECATION")
-    private fun toggleAudioRoute(newAudioRoute: Int, condition: Boolean? = null, fallback: Int = CallAudioState.ROUTE_WIRED_OR_EARPIECE) {
-        //TODO(cybex-dev) implement API 34 endpoint & mute state change listeners
-        callAudioState?.let {
-            val newRoute = if (condition ?: (newAudioRoute == fallback)) newAudioRoute else fallback
-            setAudioRoute(newRoute)
-
-            // Since audio route onCallAudioStateChanged does not respond to changes when call is on hold, we invoke this change manually to notify the UI.
-            if (state == STATE_HOLDING) {
-                onCallAudioStateChanged(callAudioState.copyWith(newRoute))
-            }
+    private fun broadcastAudioState() {
+        val audio = TVAudioManager.getInstance(context)
+        Intent(TVBroadcastReceiver.ACTION_AUDIO_STATE).apply {
+            putExtra(TVBroadcastReceiver.EXTRA_MUTE_STATE, isMuted)
+            putExtra(TVBroadcastReceiver.EXTRA_SPEAKER_STATE, audio.isSpeakerOn)
+            putExtra(TVBroadcastReceiver.EXTRA_BLUETOOTH_STATE, audio.isBluetoothOn)
+        }.also {
+            sendBroadcast(context, it)
         }
     }
 
@@ -499,7 +403,6 @@ open class TVCallConnection(
             setDisconnected(DisconnectCause(DisconnectCause.LOCAL))
             onDisconnected?.withValue(DisconnectCause(DisconnectCause.LOCAL))
             onCallStateListener?.withValue(Call.State.DISCONNECTED)
-            destroy()
         }
     }
 

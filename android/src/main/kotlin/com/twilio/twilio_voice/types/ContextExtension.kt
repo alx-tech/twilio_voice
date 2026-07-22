@@ -1,7 +1,6 @@
 package com.twilio.twilio_voice.types
 
 import android.content.Context
-import android.telecom.TelecomManager
 import androidx.core.content.PermissionChecker
 import com.twilio.twilio_voice.types.ContextExtension.hasReadPhoneNumbersPermission
 import com.twilio.twilio_voice.types.ContextExtension.hasReadPhoneStatePermission

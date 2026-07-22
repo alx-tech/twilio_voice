@@ -44,9 +44,14 @@ class TVBroadcastReceiver(private val plugin: TwilioVoicePlugin) : BroadcastRece
         const val ACTION_CALL_STATE: String = "com.twilio.ACTION_CALL_STATE"
 
         /**
-         * Extra used with [ACTION_AUDIO_STATE] to indicate the new audio state.
+         * Extra used with [ACTION_AUDIO_STATE], [ACTION_CALL_STATE] to indicate the new speakerphone state.
          */
-        const val EXTRA_AUDIO_STATE: String = "EXTRA_AUDIO_STATE"
+        const val EXTRA_SPEAKER_STATE: String = "EXTRA_SPEAKER_STATE"
+
+        /**
+         * Extra used with [ACTION_AUDIO_STATE] to indicate the new bluetooth state.
+         */
+        const val EXTRA_BLUETOOTH_STATE: String = "EXTRA_BLUETOOTH_STATE"
 
         /**
          * Extra used with [ACTION_ACTIVE_CALL_CHANGED], [ACTION_CALL_ENDED] providing the active call handle.
