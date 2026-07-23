@@ -6,8 +6,10 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Person
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Bundle
@@ -18,6 +20,8 @@ import java.util.concurrent.ConcurrentHashMap
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.twilio.twilio_voice.R
 import com.twilio.twilio_voice.activities.TVIncomingCallActivity
+import com.twilio.twilio_voice.audio.TVAudioManager
+import com.twilio.twilio_voice.audio.TVRinger
 import com.twilio.twilio_voice.call.TVCallInviteParametersImpl
 import com.twilio.twilio_voice.call.TVCallParametersImpl
 import com.twilio.twilio_voice.call.TVParameters
@@ -207,8 +211,34 @@ class TVConnectionService : Service() {
     }
 
 
+    private val ringer: TVRinger by lazy { TVRinger(applicationContext) }
+
+    private val audioStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            refreshOngoingNotification()
+        }
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        LocalBroadcastManager.getInstance(applicationContext)
+            .registerReceiver(audioStateReceiver, IntentFilter(TVBroadcastReceiver.ACTION_AUDIO_STATE))
+    }
+
+    override fun onDestroy() {
+        LocalBroadcastManager.getInstance(applicationContext).unregisterReceiver(audioStateReceiver)
+        ringer.stop()
+        super.onDestroy()
+    }
+
     override fun onBind(intent: Intent?): IBinder? {
         return null
+    }
+
+    private fun refreshOngoingNotification() {
+        if (!hasActiveCalls()) return
+        val notificationManager: NotificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.notify(SERVICE_TYPE_MICROPHONE, createNotification())
     }
 
     private fun stopSelfSafe(): Boolean {
@@ -256,6 +286,8 @@ class TVConnectionService : Service() {
                 }
 
                 ACTION_CANCEL_CALL_INVITE -> {
+                    ringer.stop()
+
                     // Load CancelledCallInvite class loader
                     // See: https://github.com/twilio/voice-quickstart-android/issues/561#issuecomment-1678613170
                     it.setExtrasClassLoader(CallInvite::class.java.classLoader)
@@ -295,9 +327,12 @@ class TVConnectionService : Service() {
 
                     // Present a full-screen-intent notification + native ringing Activity instead of the system's Telecom incoming call UI
                     startIncomingCallForeground(callInvite.callSid, connection.callerDisplayName ?: callParams.from)
+                    ringer.start()
                 }
 
                 ACTION_ANSWER -> {
+                    ringer.stop()
+
                     val callHandle = it.getStringExtra(EXTRA_CALL_HANDLE) ?: getIncomingCallHandle() ?: run {
                         Log.e(TAG, "onStartCommand: ACTION_ANSWER is missing String EXTRA_CALL_HANDLE")
                         return@let
@@ -316,6 +351,8 @@ class TVConnectionService : Service() {
                 }
 
                 ACTION_REJECT -> {
+                    ringer.stop()
+
                     val callHandle = it.getStringExtra(EXTRA_CALL_HANDLE) ?: getIncomingCallHandle() ?: run {
                         Log.e(TAG, "onStartCommand: ACTION_REJECT is missing String EXTRA_CALL_HANDLE")
                         return@let
@@ -405,6 +442,7 @@ class TVConnectionService : Service() {
 
                     // Set call disconnected listener, removes connection from active connections when call is disconnected
                     val onCallInitializingDisconnectedListener: CompletionHandler<DisconnectCause> = CompletionHandler {
+                        ringer.stop()
                         connection.twilioCall?.let { call ->
                             if (activeConnections.containsKey(call.sid)) {
                                 activeConnections.remove(call.sid)
@@ -505,6 +543,7 @@ class TVConnectionService : Service() {
             sendBroadcastCallHandle(applicationContext, extra?.getString(TVBroadcastReceiver.EXTRA_CALL_HANDLE))
         }
         val onDisconnect: CompletionHandler<DisconnectCause> = CompletionHandler {
+            ringer.stop()
             if (activeConnections.containsKey(callSid)) {
                 activeConnections.remove(callSid)
             }
@@ -514,10 +553,12 @@ class TVConnectionService : Service() {
         val onCallState: CompletionHandler<Call.State> = CompletionHandler { state ->
             when (state) {
                 Call.State.CONNECTED -> {
+                    ringer.stop()
                     // Swap the ringing full-screen notification for the ordinary ongoing call notification
                     startForegroundService()
                 }
                 Call.State.DISCONNECTED -> {
+                    ringer.stop()
                     if (activeConnections.containsKey(callSid)) {
                         activeConnections.remove(callSid)
                     }
@@ -571,10 +612,12 @@ class TVConnectionService : Service() {
         val id = "${applicationContext.packageName}_calls"
         val name = applicationContext.appName
         val descriptionText = "Active Voice Calls"
-        val importance = NotificationManager.IMPORTANCE_NONE
+        val importance = NotificationManager.IMPORTANCE_LOW
         val channel = NotificationChannel(id, name, importance).apply {
             description = descriptionText
             lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            setSound(null, null)
+            enableVibration(false)
         }
         val notificationManager: NotificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.createNotificationChannel(channel)
@@ -589,12 +632,62 @@ class TVConnectionService : Service() {
         val flag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE else PendingIntent.FLAG_UPDATE_CURRENT
         val pendingIntent: PendingIntent = PendingIntent.getActivity(applicationContext, 0, intent, flag);
 
-        return Notification.Builder(this, channel.id).apply {
+        val callHandle = getActiveCallHandle()
+        val connection = callHandle?.let { getConnection(it) }
+        val isSpeakerOn = TVAudioManager.getInstance(applicationContext).isSpeakerOn
+        val isMuted = connection?.isMuted ?: false
+        val callerDisplayName = connection?.callerDisplayName ?: "Voice call"
+
+        fun servicePendingIntent(requestCode: Int, action: String, extra: Pair<String, Boolean>? = null): PendingIntent {
+            val serviceIntent = Intent(applicationContext, TVConnectionService::class.java).apply {
+                this.action = action
+                callHandle?.let { putExtra(EXTRA_CALL_HANDLE, it) }
+                extra?.let { (key, value) -> putExtra(key, value) }
+            }
+            return PendingIntent.getService(applicationContext, requestCode, serviceIntent, flag)
+        }
+
+        val hangupIntent = servicePendingIntent(300, ACTION_HANGUP)
+        val speakerIntent = servicePendingIntent(301, ACTION_TOGGLE_SPEAKER, EXTRA_SPEAKER_STATE to !isSpeakerOn)
+        val muteIntent = servicePendingIntent(302, ACTION_TOGGLE_MUTE, EXTRA_MUTE_STATE to !isMuted)
+
+        val speakerAction = Notification.Action.Builder(
+            android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_microphone),
+            if (isSpeakerOn) "Speaker off" else "Speaker on",
+            speakerIntent
+        ).build()
+        val muteAction = Notification.Action.Builder(
+            android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_microphone),
+            if (isMuted) "Unmute" else "Mute",
+            muteIntent
+        ).build()
+
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val person = Person.Builder().setName(callerDisplayName).build()
+            Notification.Builder(this, channel.id)
+                .setStyle(Notification.CallStyle.forOngoingCall(person, hangupIntent))
+                .addAction(speakerAction)
+                .addAction(muteAction)
+                .setSmallIcon(R.drawable.ic_microphone)
+        } else {
+            val hangupAction = Notification.Action.Builder(
+                android.graphics.drawable.Icon.createWithResource(this, R.drawable.ic_microphone),
+                "Hang up",
+                hangupIntent
+            ).build()
+            Notification.Builder(this, channel.id)
+                .setContentTitle(callerDisplayName)
+                .setContentText("Ongoing call")
+                .setSmallIcon(R.drawable.ic_microphone)
+                .addAction(speakerAction)
+                .addAction(muteAction)
+                .addAction(hangupAction)
+        }
+
+        return builder.apply {
             setOngoing(true)
-            setContentTitle("Voice Calls")
-            setCategory(Notification.CATEGORY_SERVICE)
+            setCategory(Notification.CATEGORY_CALL)
             setContentIntent(pendingIntent)
-            setSmallIcon(R.drawable.ic_microphone)
         }.build()
     }
 

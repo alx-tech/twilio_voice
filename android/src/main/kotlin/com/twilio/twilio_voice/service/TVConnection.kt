@@ -107,7 +107,8 @@ open class TVCallConnection(
 
     var extras: Bundle = Bundle()
     var callerDisplayName: String? = null
-    private var isMuted: Boolean = false
+    var isMuted: Boolean = false
+        private set
 
     init {
         context = ctx
