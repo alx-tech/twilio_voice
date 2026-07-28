@@ -2,4 +2,11 @@
 <resources>
     <string name="cancel">Cancelar</string>
     <string name="proceed">Proceder</string>
+    <string name="incoming_call_title">Llamada entrante</string>
+    <string name="call_accept">Aceptar</string>
+    <string name="call_decline">Rechazar</string>
+    <string name="unknown_caller">Llamada desconocida</string>
+    <string name="call_mute">Silenciar</string>
+    <string name="call_speaker">Altavoz</string>
+    <string name="call_end_call">Finalizar llamada</string>
 </resources>

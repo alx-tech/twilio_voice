@@ -5,7 +5,14 @@
 
     <color name="white">#FFFFFF</color>
     <color name="white_55">#55FFFFFF</color>
+    <color name="white_70">#B3FFFFFF</color>
+    <color name="white_14">#24FFFFFF</color>
+    <color name="white_12">#1FFFFFFF</color>
     <color name="black">#000000</color>
+    <color name="call_screen_bg">#111418</color>
+    <color name="call_screen_icon_active">#111418</color>
+    <color name="call_accept_green">#43A047</color>
+    <color name="call_decline_red">#E53935</color>
     <color name="blackHalfTransparent">#7E000000</color>
     <color name="black75Transparent">#36000000</color>
     <color name="grayLight">#C2BEBE</color>

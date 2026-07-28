@@ -345,6 +345,10 @@ class TVConnectionService : Service() {
 
                     if(connection is TVCallInviteConnection) {
                         connection.acceptInvite()
+                        // Ensure the native in-call Activity is up — if the answer came from
+                        // the heads-up notification action rather than the full-screen ringing
+                        // Activity morphing itself, it hasn't been launched yet.
+                        launchInCallActivity(callHandle, connection.callerDisplayName ?: connection.getCallParameters()?.from)
                     } else {
                         Log.e(TAG, "onStartCommand: [ACTION_ANSWER] could not find connection for callHandle: $callHandle")
                     }
@@ -696,6 +700,24 @@ class TVConnectionService : Service() {
         notificationManager.cancel(SERVICE_TYPE_MICROPHONE)
     }
 
+    private fun launchInCallActivity(callHandle: String, callerDisplayName: String?) {
+        val launchIntent = Intent(applicationContext, TVIncomingCallActivity::class.java).apply {
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
+            )
+            putExtra(EXTRA_CALL_HANDLE, callHandle)
+            putExtra(TVIncomingCallActivity.EXTRA_CALLER_DISPLAY_NAME, callerDisplayName)
+            putExtra(TVIncomingCallActivity.EXTRA_IN_CALL, true)
+        }
+        try {
+            startActivity(launchIntent)
+        } catch (e: Exception) {
+            Log.w(TAG, "launchInCallActivity: could not launch in-call activity: $e")
+        }
+    }
+
     /// Source: https://github.com/react-native-webrtc/react-native-callkeep/blob/master/android/src/main/java/io/wazo/callkeep/VoiceConnectionService.java#L295
     private fun startForegroundService() {
         val notification = createNotification()
@@ -731,6 +753,10 @@ class TVConnectionService : Service() {
             description = "Incoming call notifications"
             lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             setBypassDnd(true)
+            // TVRinger owns the ringtone + vibration (looping, ringer-mode aware),
+            // so the channel itself stays silent to avoid a one-shot double-buzz.
+            enableVibration(false)
+            setSound(null, null)
         }
         val notificationManager: NotificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.createNotificationChannel(channel)

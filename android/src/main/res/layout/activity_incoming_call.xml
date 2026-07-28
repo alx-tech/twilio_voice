@@ -2,65 +2,281 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/black"
+    android:background="@color/call_screen_bg"
     android:orientation="vertical"
     android:gravity="center_horizontal"
+    android:paddingLeft="24dp"
+    android:paddingRight="24dp"
     android:paddingTop="64dp"
-    android:paddingBottom="48dp">
+    android:paddingBottom="32dp">
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="32dp"
-        android:text="@string/incoming_call_title"
-        android:textColor="@color/white_55"
-        android:textSize="16sp" />
+    <Space
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="3" />
+
+    <FrameLayout
+        android:id="@+id/incoming_call_avatar"
+        android:layout_width="112dp"
+        android:layout_height="112dp"
+        android:background="@drawable/bg_circle_avatar">
+
+        <TextView
+            android:id="@+id/incoming_call_avatar_initials"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:textColor="@color/white"
+            android:textSize="40sp"
+            android:textStyle="bold" />
+
+        <ImageView
+            android:id="@+id/incoming_call_avatar_icon"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_gravity="center"
+            android:src="@drawable/ic_person"
+            android:visibility="gone"
+            android:contentDescription="@null" />
+
+    </FrameLayout>
 
     <TextView
         android:id="@+id/incoming_call_caller_name"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
+        android:layout_marginTop="24dp"
         android:paddingLeft="24dp"
         android:paddingRight="24dp"
         android:gravity="center"
         android:textColor="@color/white"
-        android:textSize="32sp"
+        android:textSize="28sp"
         android:textStyle="bold" />
 
-    <LinearLayout
+    <TextView
+        android:id="@+id/incoming_call_status"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="@string/incoming_call_title"
+        android:textColor="@color/white_70"
+        android:textSize="16sp" />
+
+    <Chronometer
+        android:id="@+id/incall_timer"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:textColor="@color/white_70"
+        android:textSize="16sp"
+        android:visibility="gone" />
+
+    <Space
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
-        android:orientation="vertical" />
+        android:layout_weight="4" />
 
     <LinearLayout
+        android:id="@+id/incoming_call_ringing_actions"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:gravity="center"
-        android:paddingLeft="32dp"
-        android:paddingRight="32dp">
+        android:gravity="center">
 
-        <Button
-            android:id="@+id/incoming_call_decline"
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginEnd="12dp"
-            android:backgroundTint="#E53935"
-            android:text="@string/call_decline"
-            android:textColor="@color/white" />
+            android:orientation="vertical"
+            android:gravity="center">
 
-        <Button
-            android:id="@+id/incoming_call_accept"
+            <FrameLayout
+                android:id="@+id/incoming_call_decline"
+                android:layout_width="80dp"
+                android:layout_height="80dp"
+                android:background="@drawable/bg_circle_decline"
+                android:foreground="?android:attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:focusable="true">
+
+                <ImageView
+                    android:layout_width="32dp"
+                    android:layout_height="32dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_call_end"
+                    android:contentDescription="@string/call_decline" />
+
+            </FrameLayout>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/call_decline"
+                android:textColor="@color/white_70"
+                android:textSize="14sp" />
+
+        </LinearLayout>
+
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginStart="12dp"
-            android:backgroundTint="#43A047"
-            android:text="@string/call_accept"
-            android:textColor="@color/white" />
+            android:orientation="vertical"
+            android:gravity="center">
+
+            <FrameLayout
+                android:id="@+id/incoming_call_accept"
+                android:layout_width="80dp"
+                android:layout_height="80dp"
+                android:background="@drawable/bg_circle_accept"
+                android:foreground="?android:attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:focusable="true">
+
+                <ImageView
+                    android:layout_width="32dp"
+                    android:layout_height="32dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_call"
+                    android:contentDescription="@string/call_accept" />
+
+            </FrameLayout>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/call_accept"
+                android:textColor="@color/white_70"
+                android:textSize="14sp" />
+
+        </LinearLayout>
 
     </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/incall_actions"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="32dp"
+                android:orientation="vertical"
+                android:gravity="center">
+
+                <FrameLayout
+                    android:id="@+id/incall_mute"
+                    android:layout_width="68dp"
+                    android:layout_height="68dp"
+                    android:background="@drawable/bg_circle_toggle_off"
+                    android:foreground="?android:attr/selectableItemBackgroundBorderless"
+                    android:clickable="true"
+                    android:focusable="true">
+
+                    <ImageView
+                        android:id="@+id/incall_mute_icon"
+                        android:layout_width="28dp"
+                        android:layout_height="28dp"
+                        android:layout_gravity="center"
+                        android:src="@drawable/ic_mic"
+                        android:contentDescription="@string/call_mute" />
+
+                </FrameLayout>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="@string/call_mute"
+                    android:textColor="@color/white_70"
+                    android:textSize="14sp" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center">
+
+                <FrameLayout
+                    android:id="@+id/incall_speaker"
+                    android:layout_width="68dp"
+                    android:layout_height="68dp"
+                    android:background="@drawable/bg_circle_toggle_off"
+                    android:foreground="?android:attr/selectableItemBackgroundBorderless"
+                    android:clickable="true"
+                    android:focusable="true">
+
+                    <ImageView
+                        android:id="@+id/incall_speaker_icon"
+                        android:layout_width="28dp"
+                        android:layout_height="28dp"
+                        android:layout_gravity="center"
+                        android:src="@drawable/ic_volume_down"
+                        android:contentDescription="@string/call_speaker" />
+
+                </FrameLayout>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="@string/call_speaker"
+                    android:textColor="@color/white_70"
+                    android:textSize="14sp" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="40dp"
+            android:orientation="vertical"
+            android:gravity="center">
+
+            <FrameLayout
+                android:id="@+id/incall_hangup"
+                android:layout_width="68dp"
+                android:layout_height="68dp"
+                android:background="@drawable/bg_circle_decline"
+                android:foreground="?android:attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:focusable="true">
+
+                <ImageView
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_call_end"
+                    android:contentDescription="@string/call_end_call" />
+
+            </FrameLayout>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/call_end_call"
+                android:textColor="@color/white_70"
+                android:textSize="14sp" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
 </LinearLayout>

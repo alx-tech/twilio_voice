@@ -2,4 +2,11 @@
 <resources>
     <string name="cancel">Annulla</string>
     <string name="proceed">Procedere</string>
+    <string name="incoming_call_title">Chiamata in arrivo</string>
+    <string name="call_accept">Rispondi</string>
+    <string name="call_decline">Rifiuta</string>
+    <string name="unknown_caller">Chiamante sconosciuto</string>
+    <string name="call_mute">Muto</string>
+    <string name="call_speaker">Altoparlante</string>
+    <string name="call_end_call">Termina chiamata</string>
 </resources>

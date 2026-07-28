@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="incoming_call_title">Appel entrant</string>
+    <string name="call_accept">Répondre</string>
+    <string name="call_decline">Refuser</string>
+    <string name="unknown_caller">Appelant inconnu</string>
+    <string name="call_mute">Muet</string>
+    <string name="call_speaker">Haut-parleur</string>
+    <string name="call_end_call">Raccrocher</string>
+</resources>
