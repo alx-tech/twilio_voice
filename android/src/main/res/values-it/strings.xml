@@ -9,4 +9,5 @@
     <string name="call_mute">Muto</string>
     <string name="call_speaker">Altoparlante</string>
     <string name="call_end_call">Termina chiamata</string>
+    <string name="call_missed_title">Chiamata persa</string>
 </resources>

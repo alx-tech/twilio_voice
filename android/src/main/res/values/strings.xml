@@ -12,4 +12,5 @@
     <string name="call_mute">Mute</string>
     <string name="call_speaker">Speaker</string>
     <string name="call_end_call">End call</string>
+    <string name="call_missed_title">Missed call</string>
 </resources>

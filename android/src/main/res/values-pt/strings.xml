@@ -7,4 +7,5 @@
     <string name="call_mute">Silenciar</string>
     <string name="call_speaker">Altifalante</string>
     <string name="call_end_call">Terminar chamada</string>
+    <string name="call_missed_title">Chamada perdida</string>
 </resources>

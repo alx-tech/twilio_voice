@@ -7,4 +7,5 @@
     <string name="call_mute">Wycisz</string>
     <string name="call_speaker">Głośnik</string>
     <string name="call_end_call">Zakończ połączenie</string>
+    <string name="call_missed_title">Nieodebrane połączenie</string>
 </resources>

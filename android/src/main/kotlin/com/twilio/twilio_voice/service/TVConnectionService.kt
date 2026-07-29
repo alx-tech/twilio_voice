@@ -11,6 +11,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
@@ -298,7 +299,15 @@ class TVConnectionService : Service() {
                     }
 
                     val callHandle = cancelledCallInvite.callSid
-                    getConnection(callHandle)?.onAbort() ?: run {
+                    val conn = getConnection(callHandle)
+                    val displayName = conn?.callerDisplayName
+                        ?: conn?.getCallParameters()?.from
+                        ?: cancelledCallInvite.from
+                        ?: getString(R.string.unknown_caller)
+                    val leadId = conn?.getCallParameters()?.customParameters?.get("lead_id")
+                    postMissedCallNotification(callHandle, displayName, leadId)
+
+                    conn?.onAbort() ?: run {
                         Log.e(TAG, "onStartCommand: [ACTION_CANCEL_CALL_INVITE] could not find connection for callHandle: $callHandle")
                         startForegroundThenStopIfIdle()
                     }
@@ -823,6 +832,41 @@ class TVConnectionService : Service() {
         } catch (e: Exception) {
             Log.w(TAG, "[VoiceConnectionService] Can't start incoming call foreground service : $e")
         }
+    }
+    //endregion
+
+    //region Missed call notification
+    private fun getOrCreateMissedCallChannel(): NotificationChannel {
+        val id = "${applicationContext.packageName}_missed_calls"
+        val channel = NotificationChannel(id, "Missed calls", NotificationManager.IMPORTANCE_DEFAULT)
+        val notificationManager: NotificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.createNotificationChannel(channel)
+        return channel
+    }
+
+    private fun postMissedCallNotification(callHandle: String, displayName: String, leadId: String?) {
+        val channel = getOrCreateMissedCallChannel()
+        val flag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE else PendingIntent.FLAG_UPDATE_CURRENT
+
+        // infinit://deeplink/leads/<id> is kept in sync with the dealer app's deep-link scheme
+        val contentIntent = if (leadId != null) {
+            Intent(Intent.ACTION_VIEW, Uri.parse("infinit://deeplink/leads/$leadId")).setPackage(applicationContext.packageName)
+        } else {
+            packageManager.getLaunchIntentForPackage(applicationContext.packageName)
+        }
+        val pendingIntent = contentIntent?.let { PendingIntent.getActivity(applicationContext, callHandle.hashCode(), it, flag) }
+
+        val notification = Notification.Builder(this, channel.id)
+            .setSmallIcon(R.drawable.ic_call)
+            .setContentTitle(getString(R.string.call_missed_title))
+            .setContentText(displayName)
+            .setCategory(Notification.CATEGORY_MISSED_CALL)
+            .setAutoCancel(true)
+            .apply { pendingIntent?.let { setContentIntent(it) } }
+            .build()
+
+        val notificationManager: NotificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.notify(callHandle.hashCode(), notification)
     }
     //endregion
 }
