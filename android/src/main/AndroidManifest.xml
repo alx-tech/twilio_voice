@@ -12,12 +12,17 @@
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL"/>
 
     <application>
+        <!-- Both types are declared because startForeground() may only pass a type
+             declared here: phoneCall while ringing (it is exempt from the Android 14+
+             while-in-use background-start restriction), plus microphone once the call
+             is connected and the mic is actually in use. -->
         <service
             android:name=".service.TVConnectionService"
             android:exported="false"
-            android:foregroundServiceType="microphone"
+            android:foregroundServiceType="phoneCall|microphone"
             android:label="@string/connection_service_name" />
 
         <activity
