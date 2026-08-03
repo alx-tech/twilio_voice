@@ -47,7 +47,8 @@ class TVConnectionService : Service() {
 
         val TWI_SCHEME: String = "twi"
 
-        val SERVICE_TYPE_MICROPHONE: Int = 100
+        /** Notification id shared by the ringing and ongoing-call notifications. */
+        val NOTIFICATION_ID_CALL: Int = 100
 
         //region ACTIONS_* Constants
         /**
@@ -239,7 +240,7 @@ class TVConnectionService : Service() {
     private fun refreshOngoingNotification() {
         if (!hasActiveCalls()) return
         val notificationManager: NotificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.notify(SERVICE_TYPE_MICROPHONE, createNotification())
+        notificationManager.notify(NOTIFICATION_ID_CALL, createNotification())
     }
 
     private fun stopSelfSafe(): Boolean {
@@ -258,7 +259,9 @@ class TVConnectionService : Service() {
      * Posts the minimal ongoing-call notification, then immediately tears it down if idle.
      */
     private fun startForegroundThenStopIfIdle() {
-        startForegroundService()
+        // Reached from background FCM paths (e.g. a cancelled invite) with no call to carry, so
+        // never claim the microphone here.
+        startForegroundService(wantMicrophone = false)
         if (!hasActiveCalls()) {
             stopForegroundService()
             stopSelf()
@@ -472,7 +475,9 @@ class TVConnectionService : Service() {
                     // Setup connection UI parameters
                     connection.setInitializing()
 
-                    startForegroundService()
+                    // Outgoing call placed from the app, so the mic is in use and the app is
+                    // foreground — the microphone claim is both needed and permitted.
+                    startForegroundService(wantMicrophone = true)
                 }
 
                 ACTION_TOGGLE_BLUETOOTH -> {
@@ -567,8 +572,9 @@ class TVConnectionService : Service() {
             when (state) {
                 Call.State.CONNECTED -> {
                     ringer.stop()
-                    // Swap the ringing full-screen notification for the ordinary ongoing call notification
-                    startForegroundService()
+                    // Swap the ringing full-screen notification for the ordinary ongoing call
+                    // notification, now claiming the microphone the connected call is using.
+                    startForegroundService(wantMicrophone = true)
                 }
                 Call.State.DISCONNECTED -> {
                     ringer.stop()
@@ -706,7 +712,7 @@ class TVConnectionService : Service() {
 
     private fun cancelNotification() {
         val notificationManager: NotificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.cancel(SERVICE_TYPE_MICROPHONE)
+        notificationManager.cancel(NOTIFICATION_ID_CALL)
     }
 
     private fun launchInCallActivity(callHandle: String, callerDisplayName: String?) {
@@ -727,19 +733,54 @@ class TVConnectionService : Service() {
         }
     }
 
+    /**
+     * Goes foreground with [notification], always claiming `phoneCall` and additionally
+     * `microphone` when [wantMicrophone].
+     *
+     * `microphone` is a while-in-use foreground-service type: from Android 14 it cannot be started
+     * while the app is in the background. Incoming calls arrive as an FCM push with the app
+     * backgrounded, so claiming it there throws — and because the notification is posted *by*
+     * startForeground, the phone never rings at all. `phoneCall` carries no such restriction (it
+     * needs only MANAGE_OWN_CALLS or ROLE_DIALER, and this plugin declares the former), so it is
+     * always claimed and `microphone` is added only once the call is connected and the mic is
+     * genuinely in use.
+     *
+     * The microphone claim can still be refused when a call connects while the app is in the
+     * background, so that case falls back to `phoneCall` alone: being foreground without the mic
+     * type beats failing to go foreground at all, which the system punishes with
+     * ForegroundServiceDidNotStartInTimeException.
+     */
+    private fun startForegroundWithCallTypes(notification: Notification, wantMicrophone: Boolean) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            startForeground(NOTIFICATION_ID_CALL, notification)
+            return
+        }
+        if (!wantMicrophone) {
+            startForeground(NOTIFICATION_ID_CALL, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL)
+            return
+        }
+        try {
+            startForeground(
+                NOTIFICATION_ID_CALL,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "[VoiceConnectionService] microphone service type refused, continuing as phoneCall only: $e")
+            startForeground(NOTIFICATION_ID_CALL, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL)
+        }
+    }
+
     /// Source: https://github.com/react-native-webrtc/react-native-callkeep/blob/master/android/src/main/java/io/wazo/callkeep/VoiceConnectionService.java#L295
-    private fun startForegroundService() {
+    private fun startForegroundService(wantMicrophone: Boolean) {
         val notification = createNotification()
         Log.d(TAG, "[VoiceConnectionService] Starting foreground service")
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                // FOREGROUND_SERVICE_TYPE_PHONE_CALL requires a self-managed ConnectionService, which the FSI rewrite removed; microphone is what the call actually uses.
-                startForeground(SERVICE_TYPE_MICROPHONE, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
-            } else {
-                startForeground(SERVICE_TYPE_MICROPHONE, notification)
-            }
+            startForegroundWithCallTypes(notification, wantMicrophone)
         } catch (e: Exception) {
-            Log.w(TAG, "[VoiceConnectionService] Can't start foreground service : $e")
+            // Error, not warn: this is the failure that silently stops the phone ringing, and it
+            // went unnoticed in production precisely because it was only logged at warn.
+            Log.e(TAG, "[VoiceConnectionService] Can't start foreground service : $e")
         }
     }
 
@@ -747,7 +788,7 @@ class TVConnectionService : Service() {
     private fun stopForegroundService() {
         Log.d(TAG, "[VoiceConnectionService] stopForegroundService")
         try {
-            stopForeground(SERVICE_TYPE_MICROPHONE)
+            stopForeground(NOTIFICATION_ID_CALL)
             cancelNotification()
         } catch (e: java.lang.Exception) {
             Log.w(TAG, "[VoiceConnectionService] can't stop foreground service :$e")
@@ -823,14 +864,12 @@ class TVConnectionService : Service() {
         val notification = createIncomingCallNotification(callSid, callerDisplayName)
         Log.d(TAG, "[VoiceConnectionService] Starting incoming call foreground service")
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                // FOREGROUND_SERVICE_TYPE_PHONE_CALL requires a self-managed ConnectionService, which the FSI rewrite removed; microphone is what the call actually uses.
-                startForeground(SERVICE_TYPE_MICROPHONE, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
-            } else {
-                startForeground(SERVICE_TYPE_MICROPHONE, notification)
-            }
+            // Ringing needs no microphone, and this runs from an FCM push with the app
+            // backgrounded — claiming `microphone` here is what stopped Android 14+ devices
+            // ringing at all, since this notification is posted by startForeground.
+            startForegroundWithCallTypes(notification, wantMicrophone = false)
         } catch (e: Exception) {
-            Log.w(TAG, "[VoiceConnectionService] Can't start incoming call foreground service : $e")
+            Log.e(TAG, "[VoiceConnectionService] Can't start incoming call foreground service : $e")
         }
     }
     //endregion
