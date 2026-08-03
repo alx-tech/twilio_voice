@@ -65,6 +65,10 @@ class TVIncomingCallActivity : AppCompatActivity() {
 
         findViewById<View>(R.id.incoming_call_accept).setOnClickListener {
             startConnectionServiceAction(TVConnectionService.ACTION_ANSWER)
+            // Switching immediately keeps the tap feeling instant, which is only safe
+            // because the service now broadcasts ACTION_CALL_ENDED when the invite has
+            // already gone — so a call answered a moment too late closes this screen
+            // instead of leaving a running timer with nothing behind it.
             switchToInCall()
         }
 
@@ -83,6 +87,11 @@ class TVIncomingCallActivity : AppCompatActivity() {
 
         findViewById<View>(R.id.incall_hangup).setOnClickListener {
             startConnectionServiceAction(TVConnectionService.ACTION_HANGUP)
+            // Close locally rather than waiting for the disconnect broadcast. The
+            // service emits one whenever it can, but this screen shows over the lock
+            // screen and is excluded from recents, so if a broadcast is ever missed
+            // the user has no other way out. Hang up must always mean hang up.
+            finish()
         }
 
         if (intent.getBooleanExtra(EXTRA_IN_CALL, false)) {

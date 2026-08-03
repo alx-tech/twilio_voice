@@ -352,6 +352,7 @@ class TVConnectionService : Service() {
 
                     val connection = getConnection(callHandle) ?: run {
                         Log.e(TAG, "onStartCommand: [ACTION_ANSWER] could not find connection for callHandle: $callHandle")
+                        broadcastCallGone(callHandle)
                         return@let
                     }
 
@@ -362,7 +363,8 @@ class TVConnectionService : Service() {
                         // Activity morphing itself, it hasn't been launched yet.
                         launchInCallActivity(callHandle, connection.callerDisplayName ?: connection.getCallParameters()?.from)
                     } else {
-                        Log.e(TAG, "onStartCommand: [ACTION_ANSWER] could not find connection for callHandle: $callHandle")
+                        Log.e(TAG, "onStartCommand: [ACTION_ANSWER] connection for callHandle is not an invite: $callHandle")
+                        broadcastCallGone(callHandle)
                     }
                 }
 
@@ -376,13 +378,15 @@ class TVConnectionService : Service() {
 
                     val connection = getConnection(callHandle) ?: run {
                         Log.e(TAG, "onStartCommand: [ACTION_REJECT] could not find connection for callHandle: $callHandle")
+                        broadcastCallGone(callHandle)
                         return@let
                     }
 
                     if(connection is TVCallInviteConnection) {
                         connection.rejectInvite()
                     } else {
-                        Log.e(TAG, "onStartCommand: [ACTION_REJECT] could not find connection for callHandle: $callHandle")
+                        Log.e(TAG, "onStartCommand: [ACTION_REJECT] connection for callHandle is not an invite: $callHandle")
+                        broadcastCallGone(callHandle)
                     }
                 }
 
@@ -394,6 +398,7 @@ class TVConnectionService : Service() {
 
                     getConnection(callHandle)?.disconnect() ?: run {
                         Log.e(TAG, "onStartCommand: [ACTION_HANGUP] could not find connection for callHandle: $callHandle")
+                        broadcastCallGone(callHandle)
                     }
                 }
 
@@ -606,6 +611,20 @@ class TVConnectionService : Service() {
     private fun <T: TVCallConnection> applyParameters(connection: T, params: TVParameters) {
         val name = if(connection.callDirection == CallDirection.OUTGOING) params.to else params.from
         connection.callerDisplayName = name
+    }
+
+    /**
+     * Tells any UI showing [callHandle] that there is no longer a call behind it.
+     *
+     * A missing connection means the invite was cancelled or the call already ended —
+     * common, because a caller who gives up mid-ring cancels the invite while the
+     * ringing UI is still on screen. [TVIncomingCallActivity] only ever closes on a
+     * broadcast, so without this the user is left looking at a call screen that
+     * cannot be dismissed: answer does nothing, and hang up disconnects a connection
+     * that is already gone.
+     */
+    private fun broadcastCallGone(callHandle: String) {
+        sendBroadcastEvent(applicationContext, TVBroadcastReceiver.ACTION_CALL_ENDED, callHandle)
     }
 
     private fun sendBroadcastEvent(ctx: Context, event: String, callSid: String?, extras: Bundle? = null) {
@@ -860,8 +879,31 @@ class TVConnectionService : Service() {
         }.build()
     }
 
+    /**
+     * Warns when the OS will not honour our full-screen intent.
+     *
+     * From Android 14 `USE_FULL_SCREEN_INTENT` is only granted by default to apps the
+     * system classifies as calling or alarm apps; otherwise the user must enable it.
+     * When it is denied, `setFullScreenIntent` silently degrades to a heads-up
+     * notification: the ringing Activity never launches and the phone does not present
+     * a call, with nothing in the logs to say why. Logging it turns a silent,
+     * unexplainable "my phone never rang" into something diagnosable.
+     */
+    private fun warnIfFullScreenIntentUnavailable() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (!notificationManager.canUseFullScreenIntent()) {
+            Log.e(
+                TAG,
+                "[VoiceConnectionService] USE_FULL_SCREEN_INTENT is not granted — the incoming call " +
+                    "will only appear as a heads-up notification and the ringing screen will not launch"
+            )
+        }
+    }
+
     private fun startIncomingCallForeground(callSid: String, callerDisplayName: String) {
         val notification = createIncomingCallNotification(callSid, callerDisplayName)
+        warnIfFullScreenIntentUnavailable()
         Log.d(TAG, "[VoiceConnectionService] Starting incoming call foreground service")
         try {
             // Ringing needs no microphone, and this runs from an FCM push with the app
