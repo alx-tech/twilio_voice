@@ -81,6 +81,16 @@ class TVAudioManager private constructor(context: Context) {
     fun hasBluetoothDevice(): Boolean = bluetoothOutput() != null
 
     /**
+     * Whether the handset is already on a native (cellular) call.
+     *
+     * `MODE_IN_CALL` is only ever set by the telephony stack; our own calls use
+     * `MODE_IN_COMMUNICATION`, so this cannot mistake an in-progress app call for a
+     * native one. Deliberately not `TelecomManager.isInCall()`, which needs the
+     * READ_PHONE_STATE runtime grant the host app does not ask for.
+     */
+    fun isOnCellularCall(): Boolean = audioManager.mode == AudioManager.MODE_IN_CALL
+
+    /**
      * One entry per output the user can send the call to.
      *
      * Bluetooth devices are listed individually and by name, because a rep may have more
