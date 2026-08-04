@@ -323,6 +323,20 @@ class TVConnectionService : Service() {
                         return@let
                     }
 
+                    // A rep already talking to someone on the handset cannot take this
+                    // call, and ringing over a live conversation is worse than useless.
+                    // Rejecting rather than ringing silently also tells the caller's flow
+                    // straight away, so it moves to the next person instead of waiting
+                    // out a ring timeout nobody is going to answer.
+                    if (TVAudioManager.getInstance(applicationContext).isOnCellularCall()) {
+                        Log.i(TAG, "onStartCommand: [ACTION_INCOMING_CALL] rejecting ${callInvite.callSid} — already on a native call")
+                        callInvite.reject(applicationContext)
+                        // Started via startForegroundService, so we must still reach
+                        // startForeground before stopping or the system kills the app.
+                        startForegroundThenStopIfIdle()
+                        return@let
+                    }
+
                     // Create storage instance for call parameters
                     val storage: Storage = StorageImpl(applicationContext)
 
