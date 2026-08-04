@@ -6,6 +6,8 @@
     <string name="unknown_caller">Apelant necunoscut</string>
     <string name="call_mute">Mut</string>
     <string name="call_speaker">Difuzor</string>
+    <string name="call_audio_output">Audio</string>
+    <string name="call_audio_output_title">Ieșire audio</string>
     <string name="call_end_call">Încheie apelul</string>
     <string name="call_missed_title">Apel pierdut</string>
 </resources>

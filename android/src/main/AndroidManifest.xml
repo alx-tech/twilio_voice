@@ -13,6 +13,12 @@
     <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL"/>
+    <!-- Routing call audio to a paired headset. BLUETOOTH_CONNECT is a runtime
+         permission from API 31, so the host app must also request it; declaring it
+         here only makes the request possible. BLUETOOTH covers the pre-31
+         startBluetoothSco path and is implicit from 31 onwards. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
 
     <application>
         <!-- Both types are declared because startForeground() may only pass a type
