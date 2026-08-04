@@ -81,6 +81,78 @@ class TVAudioManager private constructor(context: Context) {
     fun hasBluetoothDevice(): Boolean = bluetoothOutput() != null
 
     /**
+     * One entry per output the user can send the call to.
+     *
+     * Bluetooth devices are listed individually and by name, because a rep may have more
+     * than one paired — a headset and a car kit — and a single "Bluetooth" entry would
+     * not say which. Below API 31 the platform offers no per-device routing, so only
+     * earpiece, speaker and one combined Bluetooth entry are possible there.
+     */
+    fun availableRoutes(): List<TVAudioRoute> {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val activeId = audioManager.communicationDevice?.id
+            return audioManager.availableCommunicationDevices
+                .filter { it.type in SELECTABLE_TYPES }
+                .distinctBy { it.id }
+                .map { TVAudioRoute(it.id, routeName(it), it.type, it.id == activeId) }
+        }
+        val bluetooth = bluetoothOutput()
+        return buildList {
+            add(TVAudioRoute(LEGACY_EARPIECE_ID, "Phone", AudioDeviceInfo.TYPE_BUILTIN_EARPIECE, !isSpeakerOn && !isBluetoothOn))
+            add(TVAudioRoute(LEGACY_SPEAKER_ID, "Speaker", AudioDeviceInfo.TYPE_BUILTIN_SPEAKER, isSpeakerOn))
+            if (bluetooth != null) {
+                add(TVAudioRoute(LEGACY_BLUETOOTH_ID, routeName(bluetooth), AudioDeviceInfo.TYPE_BLUETOOTH_SCO, isBluetoothOn))
+            }
+        }
+    }
+
+    /**
+     * Sends call audio to the route with [routeId] from [availableRoutes].
+     *
+     * Counts as a user choice, so automatic routing will not override it afterwards.
+     */
+    fun selectRoute(routeId: Int): Boolean {
+        if (!isActive) return false
+        routeChosenByUser = true
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val device = audioManager.availableCommunicationDevices.firstOrNull { it.id == routeId }
+            if (device == null) {
+                Log.w(TAG, "selectRoute: route $routeId is no longer available")
+                return false
+            }
+            // The earpiece is the platform default, so clearing beats selecting it.
+            val applied = if (device.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE) {
+                audioManager.clearCommunicationDevice()
+                true
+            } else {
+                audioManager.setCommunicationDevice(device)
+            }
+            if (applied) {
+                isSpeakerOn = device.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+                isBluetoothOn = device.type in BLUETOOTH_TYPES
+            }
+            return applied
+        }
+        return when (routeId) {
+            LEGACY_SPEAKER_ID -> setSpeakerphone(true)
+            LEGACY_BLUETOOTH_ID -> setBluetooth(true)
+            else -> setBluetooth(false) && setSpeakerphone(false)
+        }
+    }
+
+    /** Label for a route, falling back to the type when a device reports no name. */
+    private fun routeName(device: AudioDeviceInfo): String {
+        val product = device.productName?.toString()?.trim().orEmpty()
+        return when {
+            device.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "Phone"
+            device.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "Speaker"
+            product.isNotEmpty() -> product
+            device.type in BLUETOOTH_TYPES -> "Bluetooth"
+            else -> "Headset"
+        }
+    }
+
+    /**
      * Routes to a connected Bluetooth headset unless the user has chosen otherwise.
      *
      * With no headset connected the platform default (earpiece) is left alone.
@@ -201,6 +273,21 @@ class TVAudioManager private constructor(context: Context) {
             add(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) add(AudioDeviceInfo.TYPE_BLE_HEADSET)
         }
+
+        /** Outputs worth offering the user; anything else is not a call destination. */
+        private val SELECTABLE_TYPES: Set<Int> = BLUETOOTH_TYPES + setOf(
+            AudioDeviceInfo.TYPE_BUILTIN_EARPIECE,
+            AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,
+            AudioDeviceInfo.TYPE_WIRED_HEADSET,
+            AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+            AudioDeviceInfo.TYPE_USB_HEADSET,
+        )
+
+        // Below API 31 there are no per-device ids, so the three possible routes get
+        // synthetic ones. Negative to avoid colliding with real AudioDeviceInfo ids.
+        private const val LEGACY_EARPIECE_ID = -1
+        private const val LEGACY_SPEAKER_ID = -2
+        private const val LEGACY_BLUETOOTH_ID = -3
 
         @Volatile
         private var instance: TVAudioManager? = null

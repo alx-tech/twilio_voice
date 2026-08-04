@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.media.AudioDeviceInfo
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
@@ -13,6 +14,7 @@ import android.view.WindowManager
 import android.widget.Chronometer
 import android.widget.ImageView
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.twilio.twilio_voice.R
@@ -27,6 +29,12 @@ class TVIncomingCallActivity : AppCompatActivity() {
     companion object {
         const val EXTRA_CALLER_DISPLAY_NAME: String = "EXTRA_CALLER_DISPLAY_NAME"
         const val EXTRA_IN_CALL: String = "EXTRA_IN_CALL"
+
+        /** Outputs built into the handset; anything else counts as an external route. */
+        private val BUILT_IN_TYPES: Set<Int> = setOf(
+            AudioDeviceInfo.TYPE_BUILTIN_EARPIECE,
+            AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,
+        )
     }
 
     private var callHandle: String? = null
@@ -85,6 +93,10 @@ class TVIncomingCallActivity : AppCompatActivity() {
             startConnectionServiceAction(TVConnectionService.ACTION_TOGGLE_SPEAKER, mapOf(TVConnectionService.EXTRA_SPEAKER_STATE to !speakerOn))
         }
 
+        findViewById<View>(R.id.incall_route).setOnClickListener {
+            showRoutePicker()
+        }
+
         findViewById<View>(R.id.incall_hangup).setOnClickListener {
             startConnectionServiceAction(TVConnectionService.ACTION_HANGUP)
             // Close locally rather than waiting for the disconnect broadcast. The
@@ -128,11 +140,56 @@ class TVIncomingCallActivity : AppCompatActivity() {
         muted = connection?.isMuted ?: false
         speakerOn = TVAudioManager.getInstance(applicationContext).isSpeakerOn
         updateAudioButtons()
+        refreshRouteControl()
 
         if (!inCall) {
             inCall = true
             startCallTimer()
         }
+    }
+
+    /**
+     * Offers the route control only when there is a real choice to make.
+     *
+     * With no headset connected the only outputs are earpiece and speaker, which the
+     * speaker toggle already covers, so a third button would just add noise.
+     */
+    private fun refreshRouteControl() {
+        val group = findViewById<View>(R.id.incall_route_group)
+        val routes = TVAudioManager.getInstance(applicationContext).availableRoutes()
+        group.visibility = if (routes.size > 2) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.incall_route).setBackgroundResource(
+            if (routes.any { it.isActive && it.type !in BUILT_IN_TYPES }) {
+                R.drawable.bg_circle_toggle_on
+            } else {
+                R.drawable.bg_circle_toggle_off
+            }
+        )
+    }
+
+    /**
+     * Lets the user send call audio to any connected output.
+     *
+     * Each Bluetooth device is listed by its own name, so a rep with a headset and a car
+     * kit paired can tell them apart — the point of the picker over a plain toggle.
+     */
+    private fun showRoutePicker() {
+        val audio = TVAudioManager.getInstance(applicationContext)
+        val routes = audio.availableRoutes()
+        if (routes.isEmpty()) return
+        val labels = routes.map { it.name }.toTypedArray()
+        val checked = routes.indexOfFirst { it.isActive }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.call_audio_output_title)
+            .setSingleChoiceItems(labels, checked) { dialog, which ->
+                audio.selectRoute(routes[which].id)
+                // The picker can change the speaker route, so the toggle has to follow.
+                speakerOn = audio.isSpeakerOn
+                updateAudioButtons()
+                refreshRouteControl()
+                dialog.dismiss()
+            }
+            .show()
     }
 
     private fun startCallTimer() {

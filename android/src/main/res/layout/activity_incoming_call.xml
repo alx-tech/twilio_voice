@@ -240,6 +240,46 @@
 
             </LinearLayout>
 
+            <!-- Shown only when there is something beyond earpiece and speaker to pick,
+                 so a phone with no headset keeps the original two-button row. -->
+            <LinearLayout
+                android:id="@+id/incall_route_group"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="32dp"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:visibility="gone">
+
+                <FrameLayout
+                    android:id="@+id/incall_route"
+                    android:layout_width="68dp"
+                    android:layout_height="68dp"
+                    android:background="@drawable/bg_circle_toggle_off"
+                    android:foreground="?android:attr/selectableItemBackgroundBorderless"
+                    android:clickable="true"
+                    android:focusable="true">
+
+                    <ImageView
+                        android:id="@+id/incall_route_icon"
+                        android:layout_width="28dp"
+                        android:layout_height="28dp"
+                        android:layout_gravity="center"
+                        android:src="@drawable/ic_audio_route"
+                        android:contentDescription="@string/call_audio_output" />
+
+                </FrameLayout>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="@string/call_audio_output"
+                    android:textColor="@color/white_70"
+                    android:textSize="14sp" />
+
+            </LinearLayout>
+
         </LinearLayout>
 
         <LinearLayout
