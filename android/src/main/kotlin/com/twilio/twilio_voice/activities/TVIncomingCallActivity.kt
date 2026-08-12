@@ -101,8 +101,8 @@ class TVIncomingCallActivity : AppCompatActivity() {
             startConnectionServiceAction(TVConnectionService.ACTION_HANGUP)
             // Close locally rather than waiting for the disconnect broadcast. The
             // service emits one whenever it can, but this screen shows over the lock
-            // screen and is excluded from recents, so if a broadcast is ever missed
-            // the user has no other way out. Hang up must always mean hang up.
+            // screen, so leaving it up on a missed broadcast would sit on top of
+            // everything. Hang up must always mean hang up.
             finish()
         }
 
