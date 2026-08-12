@@ -679,10 +679,7 @@ class TVConnectionService : Service() {
     private fun createNotification(): Notification {
         val channel = getOrCreateChannel()
 
-        val intent = Intent(applicationContext, TVConnectionService::class.java)
-        intent.flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
         val flag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE else PendingIntent.FLAG_UPDATE_CURRENT
-        val pendingIntent: PendingIntent = PendingIntent.getActivity(applicationContext, 0, intent, flag);
 
         val callHandle = getActiveCallHandle()
         val connection = callHandle?.let { getConnection(it) }
@@ -739,8 +736,47 @@ class TVConnectionService : Service() {
         return builder.apply {
             setOngoing(true)
             setCategory(Notification.CATEGORY_CALL)
-            setContentIntent(pendingIntent)
+            callScreenPendingIntent(callHandle, connection, flag)?.let { setContentIntent(it) }
         }.build()
+    }
+
+    /**
+     * Where tapping the ongoing-call notification takes the rep.
+     *
+     * [TVIncomingCallActivity] is `excludeFromRecents`, so for an incoming call this
+     * notification is the only route back to a call the rep has navigated away from —
+     * a rep checking stock mid-conversation otherwise cannot reach the hangup button
+     * again. Outgoing calls are presented by the Flutter in-call screen inside the
+     * app's own task, so those return to the launcher rather than stacking a second
+     * call UI over it.
+     *
+     * Null with no active call, leaving the notification without a tap target instead
+     * of one that resolves to nothing.
+     */
+    private fun callScreenPendingIntent(callHandle: String?, connection: TVCallConnection?, flag: Int): PendingIntent? {
+        if (callHandle == null) {
+            return null
+        }
+        val intent = if (connection != null && connection.callDirection == CallDirection.INCOMING) {
+            Intent(applicationContext, TVIncomingCallActivity::class.java).apply {
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP
+                )
+                putExtra(EXTRA_CALL_HANDLE, callHandle)
+                putExtra(
+                    TVIncomingCallActivity.EXTRA_CALLER_DISPLAY_NAME,
+                    connection.callerDisplayName ?: connection.getCallParameters()?.from
+                )
+                putExtra(TVIncomingCallActivity.EXTRA_IN_CALL, true)
+            }
+        } else {
+            packageManager.getLaunchIntentForPackage(packageName)?.apply {
+                addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            }
+        } ?: return null
+        return PendingIntent.getActivity(applicationContext, 303, intent, flag)
     }
 
     private fun cancelNotification() {
