@@ -743,10 +743,9 @@ class TVConnectionService : Service() {
     /**
      * Where tapping the ongoing-call notification takes the rep.
      *
-     * [TVIncomingCallActivity] is `excludeFromRecents`, so for an incoming call this
-     * notification is the only route back to a call the rep has navigated away from —
-     * a rep checking stock mid-conversation otherwise cannot reach the hangup button
-     * again. Outgoing calls are presented by the Flutter in-call screen inside the
+     * For an incoming call this returns to [TVIncomingCallActivity] — the way back for a
+     * rep who left a live call to check something, alongside the task's own entry in
+     * recents. Outgoing calls are presented by the Flutter in-call screen inside the
      * app's own task, so those return to the launcher rather than stacking a second
      * call UI over it.
      *

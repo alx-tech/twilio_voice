@@ -31,10 +31,12 @@
             android:foregroundServiceType="phoneCall|microphone"
             android:label="@string/connection_service_name" />
 
+        <!-- Deliberately NOT excludeFromRecents: this Activity is the in-call screen as
+             well as the ringing one, and a rep who leaves a live call needs the ordinary
+             ways back to it. A finished call takes its task out of recents with it. -->
         <activity
             android:name=".activities.TVIncomingCallActivity"
             android:exported="false"
-            android:excludeFromRecents="true"
             android:launchMode="singleTop"
             android:showWhenLocked="true"
             android:turnScreenOn="true"
