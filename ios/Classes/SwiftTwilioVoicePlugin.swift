@@ -8,7 +8,16 @@ import UserNotifications
 
 public class SwiftTwilioVoicePlugin: NSObject, FlutterPlugin,  FlutterStreamHandler, PKPushRegistryDelegate, NotificationDelegate, CallDelegate, AVAudioPlayerDelegate, CXProviderDelegate, CXCallObserverDelegate {
     let callObserver = CXCallObserver()
-    
+
+    /// Codec preference for every call, incoming and outgoing.
+    ///
+    /// The SDK defaults to PCMU first, and PCMU is G.711: a flat 64 kbps with no
+    /// packet-loss concealment, so jitter on a cellular or dealership Wi-Fi link
+    /// is heard directly as choppy or robotic audio. Opus adapts its bitrate and
+    /// conceals loss. PCMU stays as the fallback so a leg that cannot negotiate
+    /// Opus still connects.
+    static let preferredAudioCodecs: [AudioCodec] = [OpusCodec(), PcmuCodec()]
+
     final let defaultCallKitIcon = "callkit_icon"
     var callKitIcon: String?
 
@@ -1017,6 +1026,7 @@ public class SwiftTwilioVoicePlugin: NSObject, FlutterPlugin,  FlutterStreamHand
                 }
             }
             builder.uuid = uuid
+            builder.preferredAudioCodecs = SwiftTwilioVoicePlugin.preferredAudioCodecs
         }
         let theCall = TwilioVoiceSDK.connect(options: connectOptions, delegate: self)
         self.call = theCall
@@ -1027,6 +1037,7 @@ public class SwiftTwilioVoicePlugin: NSObject, FlutterPlugin,  FlutterStreamHand
         if let ci = self.callInvite {
             let acceptOptions: AcceptOptions = AcceptOptions(callInvite: ci) { (builder) in
                 builder.uuid = ci.uuid
+                builder.preferredAudioCodecs = SwiftTwilioVoicePlugin.preferredAudioCodecs
             }
             self.sendPhoneCallEvents(description: "LOG|performAnswerVoiceCall: answering call", isError: false)
             let theCall = ci.accept(options: acceptOptions, delegate: self)

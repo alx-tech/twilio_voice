@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.telecom.DisconnectCause
 import android.util.Log
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import com.twilio.twilio_voice.audio.TVAudioCodecs
 import com.twilio.twilio_voice.audio.TVAudioManager
 import com.twilio.twilio_voice.call.TVParameters
 import com.twilio.twilio_voice.receivers.TVBroadcastReceiver
@@ -44,7 +45,7 @@ class TVCallInviteConnection(
 
     fun onAnswer() {
         Log.d(TAG, "onAnswer: onAnswer")
-        twilioCall = callInvite.accept(context, this)
+        twilioCall = callInvite.accept(context, TVAudioCodecs.acceptOptions(), this)
         onAction?.onChange(TVNativeCallActions.ACTION_ANSWERED, Bundle().apply {
             putParcelable(TVBroadcastReceiver.EXTRA_CALL_INVITE, callInvite)
             putInt(TVBroadcastReceiver.EXTRA_CALL_DIRECTION, callDirection.id)
