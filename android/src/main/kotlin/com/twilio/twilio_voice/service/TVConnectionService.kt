@@ -6,6 +6,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Person
 import android.app.Service
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -21,6 +23,7 @@ import java.util.concurrent.ConcurrentHashMap
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.twilio.twilio_voice.R
 import com.twilio.twilio_voice.activities.TVIncomingCallActivity
+import com.twilio.twilio_voice.audio.TVAudioCodecs
 import com.twilio.twilio_voice.audio.TVAudioManager
 import com.twilio.twilio_voice.audio.TVRinger
 import com.twilio.twilio_voice.call.TVCallInviteParametersImpl
@@ -351,9 +354,13 @@ class TVConnectionService : Service() {
                     applyParameters(connection, callParams)
                     connection.setRinging()
 
+                    // Ring first so the notification can carry the alert itself when
+                    // the ringer produced nothing — otherwise the call arrives with no
+                    // sound and no vibration, and nothing says why.
+                    val alerted = ringer.start()
+
                     // Present a full-screen-intent notification + native ringing Activity instead of the system's Telecom incoming call UI
-                    startIncomingCallForeground(callInvite.callSid, connection.callerDisplayName ?: callParams.from)
-                    ringer.start()
+                    startIncomingCallForeground(callInvite.callSid, connection.callerDisplayName ?: callParams.from, alerted)
                 }
 
                 ACTION_ANSWER -> {
@@ -445,8 +452,8 @@ class TVConnectionService : Service() {
                         }
                     }
 
-                    val connectOptions = ConnectOptions.Builder(token)
-                        .params(params)
+                    val connectOptions = TVAudioCodecs
+                        .applyTo(ConnectOptions.Builder(token).params(params))
                         .build()
 
                     // Create outgoing connection directly via Voice.connect, bypassing Telecom entirely
@@ -865,24 +872,43 @@ class TVConnectionService : Service() {
     //endregion
 
     //region Incoming call full-screen-intent notification
-    private fun getOrCreateIncomingCallChannel(): NotificationChannel {
-        val id = "${applicationContext.packageName}_incoming_calls"
-        val channel = NotificationChannel(id, "Incoming calls", NotificationManager.IMPORTANCE_HIGH).apply {
+    /**
+     * @param alerted whether [TVRinger] actually alerted the device. When it did
+     * not, the notification has to make the sound itself, or the call arrives
+     * completely silent. A channel's sound is fixed once created, so the audible
+     * fallback is a second channel rather than a mutation of the first.
+     */
+    private fun getOrCreateIncomingCallChannel(alerted: Boolean): NotificationChannel {
+        val suffix = if (alerted) "" else "_fallback"
+        val id = "${applicationContext.packageName}_incoming_calls$suffix"
+        val name = if (alerted) "Incoming calls" else "Incoming calls (backup ringer)"
+        val channel = NotificationChannel(id, name, NotificationManager.IMPORTANCE_HIGH).apply {
             description = "Incoming call notifications"
             lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             setBypassDnd(true)
-            // TVRinger owns the ringtone + vibration (looping, ringer-mode aware),
-            // so the channel itself stays silent to avoid a one-shot double-buzz.
-            enableVibration(false)
-            setSound(null, null)
+            if (alerted) {
+                // TVRinger owns the ringtone + vibration (looping, ringer-mode aware),
+                // so the channel itself stays silent to avoid a one-shot double-buzz.
+                enableVibration(false)
+                setSound(null, null)
+            } else {
+                enableVibration(true)
+                setSound(
+                    RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+            }
         }
         val notificationManager: NotificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.createNotificationChannel(channel)
         return channel
     }
 
-    private fun createIncomingCallNotification(callSid: String, callerDisplayName: String): Notification {
-        val channel = getOrCreateIncomingCallChannel()
+    private fun createIncomingCallNotification(callSid: String, callerDisplayName: String, alerted: Boolean): Notification {
+        val channel = getOrCreateIncomingCallChannel(alerted)
         val flag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE else PendingIntent.FLAG_UPDATE_CURRENT
 
         val fullScreenIntent = Intent(applicationContext, TVIncomingCallActivity::class.java).apply {
@@ -950,8 +976,11 @@ class TVConnectionService : Service() {
         }
     }
 
-    private fun startIncomingCallForeground(callSid: String, callerDisplayName: String) {
-        val notification = createIncomingCallNotification(callSid, callerDisplayName)
+    private fun startIncomingCallForeground(callSid: String, callerDisplayName: String, alerted: Boolean = true) {
+        val notification = createIncomingCallNotification(callSid, callerDisplayName, alerted)
+        if (!alerted) {
+            Log.w(TAG, "[VoiceConnectionService] Ringer produced no sound or vibration — falling back to the notification channel's own ringtone")
+        }
         warnIfFullScreenIntentUnavailable()
         Log.d(TAG, "[VoiceConnectionService] Starting incoming call foreground service")
         try {
