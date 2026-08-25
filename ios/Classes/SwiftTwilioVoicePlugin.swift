@@ -16,7 +16,7 @@ public class SwiftTwilioVoicePlugin: NSObject, FlutterPlugin,  FlutterStreamHand
     /// is heard directly as choppy or robotic audio. Opus adapts its bitrate and
     /// conceals loss. PCMU stays as the fallback so a leg that cannot negotiate
     /// Opus still connects.
-    static let preferredAudioCodecs: [AudioCodec] = [OpusCodec(), PcmuCodec()]
+    static let preferredAudioCodecs: [TwilioVoice.AudioCodec] = [OpusCodec(), PcmuCodec()]
 
     final let defaultCallKitIcon = "callkit_icon"
     var callKitIcon: String?
