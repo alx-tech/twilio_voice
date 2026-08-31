@@ -82,7 +82,7 @@ open class TVCallConnection(
     onEvent: ValueBundleChanged<String>? = null,
     onAction: ValueBundleChanged<String>? = null,
     onDisconnected: CompletionHandler<DisconnectCause>? = null,
-) : Call.Listener {
+) : Call.Listener, TVAudioManager.CallAudioFocusListener {
 
     companion object {
         const val STATE_NEW = 0
@@ -110,6 +110,10 @@ open class TVCallConnection(
     var callerDisplayName: String? = null
     var isMuted: Boolean = false
         private set
+
+    /** Set while the call is held for a cellular call, so only that hold is undone. */
+    private var heldForAudioFocus: Boolean = false
+    private var mutedBeforeAudioFocusLoss: Boolean = false
 
     init {
         context = ctx
@@ -157,7 +161,7 @@ open class TVCallConnection(
 
     fun setActive() {
         state = STATE_ACTIVE
-        TVAudioManager.getInstance(context).onCallActive()
+        TVAudioManager.getInstance(context).onCallActive(this)
         broadcastAudioState()
     }
 
@@ -336,6 +340,35 @@ open class TVCallConnection(
             onUnhold()
         }
     }
+
+    //region TVAudioManager.CallAudioFocusListener
+    /**
+     * Steps aside for a call on the handset.
+     *
+     * Muting as well as holding is deliberate: hold stops the media the caller hears, but
+     * the rep is now having a different conversation next to a live microphone and that
+     * must not reach the caller under any ordering.
+     *
+     * A call the user put on hold themselves is left alone — resuming it later would undo
+     * a choice we never made.
+     */
+    override fun onAudioFocusLost() {
+        if (heldForAudioFocus || state != STATE_ACTIVE) return
+        Log.i(TAG, "onAudioFocusLost: holding the call for a native call")
+        heldForAudioFocus = true
+        mutedBeforeAudioFocusLoss = isMuted
+        toggleMute(true)
+        onHold()
+    }
+
+    override fun onAudioFocusRegained() {
+        if (!heldForAudioFocus) return
+        Log.i(TAG, "onAudioFocusRegained: resuming the call")
+        heldForAudioFocus = false
+        onUnhold()
+        toggleMute(mutedBeforeAudioFocusLoss)
+    }
+    //endregion
 
     /**
      * Toggle mute state of the call.
