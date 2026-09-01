@@ -9,11 +9,16 @@ import android.media.AudioDeviceInfo
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
+import android.view.Gravity
+import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Chronometer
 import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
@@ -35,6 +40,14 @@ class TVIncomingCallActivity : AppCompatActivity() {
             AudioDeviceInfo.TYPE_BUILTIN_EARPIECE,
             AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,
         )
+
+        /** Each DTMF key with the letters printed under it; blank where a phone prints none. */
+        private val KEYPAD_KEYS: List<Pair<String, String>> = listOf(
+            "1" to "", "2" to "ABC", "3" to "DEF",
+            "4" to "GHI", "5" to "JKL", "6" to "MNO",
+            "7" to "PQRS", "8" to "TUV", "9" to "WXYZ",
+            "*" to "", "0" to "", "#" to "",
+        )
     }
 
     private var callHandle: String? = null
@@ -42,12 +55,20 @@ class TVIncomingCallActivity : AppCompatActivity() {
     private var inCall: Boolean = false
     private var muted: Boolean = false
     private var speakerOn: Boolean = false
+    private val dialedDigits = StringBuilder()
+
+    /** Back closes the pad first, so it never drops the rep out of a live call by surprise. */
+    private val keypadBackCallback = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() = setKeypadOpen(false)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setupLockScreenFlags()
         setContentView(R.layout.activity_incoming_call)
 
+        buildKeypad()
+        onBackPressedDispatcher.addCallback(this, keypadBackCallback)
         applyIntent(intent)
         registerDismissReceiver()
     }
@@ -86,15 +107,27 @@ class TVIncomingCallActivity : AppCompatActivity() {
         }
 
         findViewById<View>(R.id.incall_mute).setOnClickListener {
-            startConnectionServiceAction(TVConnectionService.ACTION_TOGGLE_MUTE, mapOf(TVConnectionService.EXTRA_MUTE_STATE to !muted))
+            startConnectionServiceAction(TVConnectionService.ACTION_TOGGLE_MUTE) {
+                putExtra(TVConnectionService.EXTRA_MUTE_STATE, !muted)
+            }
         }
 
         findViewById<View>(R.id.incall_speaker).setOnClickListener {
-            startConnectionServiceAction(TVConnectionService.ACTION_TOGGLE_SPEAKER, mapOf(TVConnectionService.EXTRA_SPEAKER_STATE to !speakerOn))
+            startConnectionServiceAction(TVConnectionService.ACTION_TOGGLE_SPEAKER) {
+                putExtra(TVConnectionService.EXTRA_SPEAKER_STATE, !speakerOn)
+            }
         }
 
         findViewById<View>(R.id.incall_route).setOnClickListener {
             showRoutePicker()
+        }
+
+        findViewById<View>(R.id.incall_keypad).setOnClickListener {
+            setKeypadOpen(true)
+        }
+
+        findViewById<View>(R.id.incall_keypad_hide).setOnClickListener {
+            setKeypadOpen(false)
         }
 
         findViewById<View>(R.id.incall_hangup).setOnClickListener {
@@ -145,7 +178,86 @@ class TVIncomingCallActivity : AppCompatActivity() {
         if (!inCall) {
             inCall = true
             startCallTimer()
+            resetKeypad()
         }
+    }
+
+    /** Builds the DTMF pad once, as rows of three inflated keys. */
+    private fun buildKeypad() {
+        val grid = findViewById<LinearLayout>(R.id.incall_keypad_grid)
+        val inflater = LayoutInflater.from(this)
+        val spacing = resources.getDimensionPixelSize(R.dimen.keypad_key_spacing)
+
+        KEYPAD_KEYS.chunked(3).forEach { rowKeys ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = spacing }
+            }
+            rowKeys.forEach { (digit, letters) ->
+                row.addView(createKeypadKey(inflater, row, digit, letters, spacing))
+            }
+            grid.addView(row)
+        }
+    }
+
+    private fun createKeypadKey(
+        inflater: LayoutInflater,
+        parent: ViewGroup,
+        digit: String,
+        letters: String,
+        spacing: Int,
+    ): View {
+        val key = inflater.inflate(R.layout.view_keypad_key, parent, false)
+        key.contentDescription = digit
+        key.setOnClickListener { onDigitPressed(digit) }
+        (key.layoutParams as LinearLayout.LayoutParams).apply {
+            marginStart = spacing
+            marginEnd = spacing
+        }
+
+        key.findViewById<TextView>(R.id.keypad_key_digit).text = digit
+        key.findViewById<TextView>(R.id.keypad_key_letters).apply {
+            text = letters
+            // INVISIBLE, not GONE: a lettered and an unlettered key must stay the same height.
+            visibility = if (letters.isEmpty()) View.INVISIBLE else View.VISIBLE
+        }
+        return key
+    }
+
+    /**
+     * Sends one tone and echoes it on screen.
+     *
+     * The echo is the only feedback. A local tone would move the audio stream mid-call,
+     * which the cellular-call interruption handling reads as an interruption.
+     */
+    private fun onDigitPressed(digit: String) {
+        startConnectionServiceAction(TVConnectionService.ACTION_SEND_DIGITS) {
+            putExtra(TVConnectionService.EXTRA_DIGITS, digit)
+        }
+        dialedDigits.append(digit)
+        findViewById<TextView>(R.id.incall_dialed_digits).apply {
+            text = dialedDigits.toString()
+            visibility = View.VISIBLE
+        }
+    }
+
+    private fun setKeypadOpen(open: Boolean) {
+        findViewById<View>(R.id.incall_toggles).visibility = if (open) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.incall_keypad_panel).visibility = if (open) View.VISIBLE else View.GONE
+        keypadBackCallback.isEnabled = open
+    }
+
+    private fun resetKeypad() {
+        dialedDigits.setLength(0)
+        findViewById<TextView>(R.id.incall_dialed_digits).apply {
+            text = ""
+            visibility = View.GONE
+        }
+        setKeypadOpen(false)
     }
 
     /**
@@ -219,11 +331,11 @@ class TVIncomingCallActivity : AppCompatActivity() {
         }
     }
 
-    private fun startConnectionServiceAction(actionName: String, extras: Map<String, Boolean> = emptyMap()) {
+    private fun startConnectionServiceAction(actionName: String, extras: Intent.() -> Unit = {}) {
         Intent(this, TVConnectionService::class.java).apply {
             action = actionName
             putExtra(TVConnectionService.EXTRA_CALL_HANDLE, callHandle)
-            extras.forEach { (key, value) -> putExtra(key, value) }
+            extras()
         }.also { startService(it) }
     }
 

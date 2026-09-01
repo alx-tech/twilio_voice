@@ -13,6 +13,8 @@
     <string name="call_speaker">Speaker</string>
     <string name="call_audio_output">Audio</string>
     <string name="call_audio_output_title">Audio output</string>
+    <string name="call_keypad">Keypad</string>
+    <string name="call_keypad_hide">Hide keypad</string>
     <string name="call_end_call">End call</string>
     <string name="call_missed_title">Missed call</string>
 </resources>
