@@ -1248,6 +1248,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                 addAction(TVNativeCallEvents.EVENT_DISCONNECTED_LOCAL)
                 addAction(TVNativeCallEvents.EVENT_DISCONNECTED_REMOTE)
                 addAction(TVNativeCallEvents.EVENT_MISSED)
+                addAction(TVNativeCallEvents.EVENT_AUTO_DECLINED)
             }
             LocalBroadcastManager.getInstance(context!!)
                 .registerReceiver(broadcastReceiver!!, intentFilter)
@@ -1738,6 +1739,11 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
             TVNativeCallEvents.EVENT_MISSED -> {
                 logEvent("", "Missed Call")
                 logEvent("", "Call Ended")
+            }
+
+            TVNativeCallEvents.EVENT_AUTO_DECLINED -> {
+                val reason = intent.getStringExtra(TVConnectionService.EXTRA_AUTO_DECLINE_REASON) ?: "unknown"
+                logEvent("", "AutoDeclined|$reason")
             }
 
             else -> {

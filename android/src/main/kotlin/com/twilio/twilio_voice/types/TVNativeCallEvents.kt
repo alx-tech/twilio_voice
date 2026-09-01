@@ -56,6 +56,13 @@ object TVNativeCallEvents {
      * The event name for when a call is missed
      */
     val EVENT_MISSED: String = "com.twilio.EVENT_MISSED"
+
+    /**
+     * The event name for an invite the app rejected on the rep's behalf, because the handset was
+     * already on a call or already ringing. Kept distinct from a rep tapping Decline: once either
+     * reaches Twilio they are the same `busy`, so this is the only way to tell them apart.
+     */
+    val EVENT_AUTO_DECLINED: String = "com.twilio.EVENT_AUTO_DECLINED"
 }
 
 /**
