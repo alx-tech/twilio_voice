@@ -926,6 +926,19 @@ public class SwiftTwilioVoicePlugin: NSObject, FlutterPlugin,  FlutterStreamHand
         }
     }
 
+    // CallKit already draws the keypad, because every call is reported with supportsDTMF.
+    // Without this handler the taps reach nothing and the action times out.
+    public func provider(_ provider: CXProvider, perform action: CXPlayDTMFCallAction) {
+        self.sendPhoneCallEvents(description: "LOG|provider:performPlayDTMFCallAction:", isError: false)
+
+        if let call = self.call {
+            call.sendDigits(action.digits)
+            action.fulfill()
+        } else {
+            action.fail()
+        }
+    }
+
     // MARK: Call Kit Actions
     func performStartCallAction(uuid: UUID, handle: String) {
         let callHandle = CXHandle(type: .generic, value: handle)
@@ -951,7 +964,7 @@ public class SwiftTwilioVoicePlugin: NSObject, FlutterPlugin,  FlutterStreamHand
             let callUpdate = CXCallUpdate()
             callUpdate.remoteHandle = callHandle
             callUpdate.localizedCallerName = callerName ?? self.clients["defaultCaller"] ?? self.defaultCaller
-            callUpdate.supportsDTMF = false
+            callUpdate.supportsDTMF = true
             callUpdate.supportsHolding = true
             callUpdate.supportsGrouping = false
             callUpdate.supportsUngrouping = false

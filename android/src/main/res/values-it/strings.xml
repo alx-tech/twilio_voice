@@ -10,6 +10,8 @@
     <string name="call_speaker">Altoparlante</string>
     <string name="call_audio_output">Audio</string>
     <string name="call_audio_output_title">Uscita audio</string>
+    <string name="call_keypad">Tastierino</string>
+    <string name="call_keypad_hide">Nascondi tastierino</string>
     <string name="call_end_call">Termina chiamata</string>
     <string name="call_missed_title">Chiamata persa</string>
 </resources>

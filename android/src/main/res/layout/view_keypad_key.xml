@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="64dp"
+    android:layout_height="64dp"
+    android:background="@drawable/bg_circle_toggle_off"
+    android:foreground="?android:attr/selectableItemBackgroundBorderless"
+    android:clickable="true"
+    android:focusable="true"
+    android:orientation="vertical"
+    android:gravity="center">
+
+    <TextView
+        android:id="@+id/keypad_key_digit"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textColor="@color/white"
+        android:textSize="24sp" />
+
+    <TextView
+        android:id="@+id/keypad_key_letters"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:letterSpacing="0.1"
+        android:textColor="@color/white_55"
+        android:textSize="9sp"
+        android:visibility="gone" />
+
+</LinearLayout>

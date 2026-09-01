@@ -8,6 +8,8 @@
     <string name="call_speaker">Altifalante</string>
     <string name="call_audio_output">Audio</string>
     <string name="call_audio_output_title">Saída de áudio</string>
+    <string name="call_keypad">Teclado</string>
+    <string name="call_keypad_hide">Ocultar teclado</string>
     <string name="call_end_call">Terminar chamada</string>
     <string name="call_missed_title">Chamada perdida</string>
 </resources>

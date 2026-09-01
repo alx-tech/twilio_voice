@@ -71,6 +71,18 @@
         android:textSize="16sp"
         android:visibility="gone" />
 
+    <TextView
+        android:id="@+id/incall_dialed_digits"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:ellipsize="start"
+        android:letterSpacing="0.25"
+        android:maxLines="1"
+        android:textColor="@color/white"
+        android:textSize="22sp"
+        android:visibility="gone" />
+
     <Space
         android:layout_width="match_parent"
         android:layout_height="0dp"
@@ -163,16 +175,19 @@
         android:gravity="center"
         android:visibility="gone">
 
+        <!-- Weighted columns rather than fixed margins: a fourth control does not fit
+             across a narrow handset otherwise, and a GONE column claims no width. -->
         <LinearLayout
-            android:layout_width="wrap_content"
+            android:id="@+id/incall_toggles"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center">
 
             <LinearLayout
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginEnd="32dp"
+                android:layout_weight="1"
                 android:orientation="vertical"
                 android:gravity="center">
 
@@ -206,8 +221,9 @@
             </LinearLayout>
 
             <LinearLayout
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
+                android:layout_weight="1"
                 android:orientation="vertical"
                 android:gravity="center">
 
@@ -244,9 +260,9 @@
                  so a phone with no headset keeps the original two-button row. -->
             <LinearLayout
                 android:id="@+id/incall_route_group"
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="32dp"
+                android:layout_weight="1"
                 android:orientation="vertical"
                 android:gravity="center"
                 android:visibility="gone">
@@ -279,6 +295,76 @@
                     android:textSize="14sp" />
 
             </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:gravity="center">
+
+                <FrameLayout
+                    android:id="@+id/incall_keypad"
+                    android:layout_width="68dp"
+                    android:layout_height="68dp"
+                    android:background="@drawable/bg_circle_toggle_off"
+                    android:foreground="?android:attr/selectableItemBackgroundBorderless"
+                    android:clickable="true"
+                    android:focusable="true">
+
+                    <ImageView
+                        android:id="@+id/incall_keypad_icon"
+                        android:layout_width="28dp"
+                        android:layout_height="28dp"
+                        android:layout_gravity="center"
+                        android:src="@drawable/ic_dialpad"
+                        android:contentDescription="@string/call_keypad" />
+
+                </FrameLayout>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="@string/call_keypad"
+                    android:textColor="@color/white_70"
+                    android:textSize="14sp" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <!-- Takes the place of the toggle row so the hang-up button below stays reachable. -->
+        <LinearLayout
+            android:id="@+id/incall_keypad_panel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:id="@+id/incall_keypad_grid"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center" />
+
+            <TextView
+                android:id="@+id/incall_keypad_hide"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:background="?android:attr/selectableItemBackground"
+                android:clickable="true"
+                android:focusable="true"
+                android:paddingLeft="24dp"
+                android:paddingTop="8dp"
+                android:paddingRight="24dp"
+                android:paddingBottom="8dp"
+                android:text="@string/call_keypad_hide"
+                android:textColor="@color/white_70"
+                android:textSize="14sp" />
 
         </LinearLayout>
 

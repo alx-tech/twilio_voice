@@ -8,6 +8,8 @@
     <string name="call_speaker">Difuzor</string>
     <string name="call_audio_output">Audio</string>
     <string name="call_audio_output_title">Ieșire audio</string>
+    <string name="call_keypad">Tastatură</string>
+    <string name="call_keypad_hide">Ascunde tastatura</string>
     <string name="call_end_call">Încheie apelul</string>
     <string name="call_missed_title">Apel pierdut</string>
 </resources>
