@@ -226,12 +226,23 @@ class TVConnectionService : Service(), TVAudioManager.RingAudioFocusListener {
     private val ringer: TVRinger by lazy { TVRinger(applicationContext) }
 
     /**
-     * Starts the ringtone and takes audio focus for it, reporting whether the device was
-     * actually alerted. Focus and ringtone are started and stopped together through this pair
-     * so the two lifecycles cannot drift apart.
+     * Starts the ringtone and takes audio focus for it, reporting whether the notification can
+     * stay silent — either because the device was alerted, or because it deliberately must not
+     * be. Focus and ringtone are started and stopped together through this pair so the two
+     * lifecycles cannot drift apart.
      */
     private fun startRinging(): Boolean {
-        TVAudioManager.getInstance(applicationContext).onRingingStarted(this)
+        val audio = TVAudioManager.getInstance(applicationContext)
+        if (!audio.onRingingStarted(this) && audio.isDeviceRinging()) {
+            // Focus is only refused when an owner holds the audio exclusively, and the telephony
+            // ringer is the thing that does that. So the handset began ringing in the gap between
+            // the guard and here: a second ringtone is the exact problem this change exists to
+            // prevent, and with no focus there would be no callback to silence it afterwards.
+            // Reported as alerted so the notification does not supply a tone of its own either —
+            // the handset is already making one.
+            Log.i(TAG, "startRinging: the handset started ringing as this call arrived — presenting it silently")
+            return true
+        }
         return ringer.start()
     }
 

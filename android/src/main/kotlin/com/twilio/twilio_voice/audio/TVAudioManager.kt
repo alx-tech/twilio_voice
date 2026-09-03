@@ -489,24 +489,31 @@ class TVAudioManager private constructor(context: Context) {
     /**
      * Takes focus for the ringtone, so a cellular call arriving *while we ring* is noticed.
      *
-     * The request's result is deliberately ignored. `AUDIOFOCUS_GAIN_TRANSIENT` is granted
-     * unless the current owner took it exclusively, and the telephony ringer holds a plain
-     * one — so a granted request proves nothing about whether the handset is already ringing.
-     * [isDeviceRinging] answers that question before we ever get here. What this buys is the
-     * loss and gain callbacks: without holding focus we are never told that something else
-     * took the audio, which is the whole of the reverse direction.
+     * A *granted* request is deliberately not read as a verdict on whether the handset is
+     * ringing: `AUDIOFOCUS_GAIN_TRANSIENT` is granted unless the current owner took it
+     * exclusively, and the telephony ringer holds a plain one. [isDeviceRinging] answers that
+     * question before we ever get here. What holding focus buys is the loss and gain
+     * callbacks: without them we are never told that something else took the audio, which is
+     * the whole of the reverse direction.
+     *
+     * A *refused* request does carry information, so it is reported rather than swallowed —
+     * refusal means an owner holds the audio exclusively, and the telephony ringer is exactly
+     * the thing that does that (`AUDIOFOCUS_FLAG_LOCK`). Only a granted request is recorded:
+     * keeping one we do not hold would leave [onRingingEnded] abandoning nothing, block a
+     * later attempt, and promise a silencing callback that can never arrive.
      *
      * `USAGE_NOTIFICATION_RINGTONE` matches what `TVRinger` plays with, so the request
      * describes the sound it is actually protecting.
+     *
+     * @return whether focus is held, i.e. whether the ringtone can still be silenced later.
+     * Also `false` when there is deliberately nothing to protect (see the ringer-mode check).
      */
-    fun onRingingStarted(listener: RingAudioFocusListener) {
-        if (ringFocusRequest != null) return
+    fun onRingingStarted(listener: RingAudioFocusListener): Boolean {
+        if (ringFocusRequest != null) return true
         // Nothing to protect on a silenced or vibrate-only handset: `TVRinger` plays no tone,
         // there is no doubled sound to prevent, and taking focus would pause whatever the rep
         // is listening to for the length of a ring they cannot hear anyway.
-        if (audioManager.ringerMode != AudioManager.RINGER_MODE_NORMAL) return
-        ringFocusListener = listener
-        ringFocusLost = false
+        if (audioManager.ringerMode != AudioManager.RINGER_MODE_NORMAL) return false
         val attributes = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
@@ -515,8 +522,14 @@ class TVAudioManager private constructor(context: Context) {
             .setAudioAttributes(attributes)
             .setOnAudioFocusChangeListener(onRingFocusChange, handler)
             .build()
+        if (audioManager.requestAudioFocus(request) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            Log.w(TAG, "onRingingStarted: audio focus refused, this ringtone cannot be silenced")
+            return false
+        }
         ringFocusRequest = request
-        audioManager.requestAudioFocus(request)
+        ringFocusListener = listener
+        ringFocusLost = false
+        return true
     }
 
     /** Releases the ringtone's focus. Safe to call when no invite is ringing. */
