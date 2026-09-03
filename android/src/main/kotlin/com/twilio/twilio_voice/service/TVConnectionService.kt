@@ -37,11 +37,12 @@ import com.twilio.twilio_voice.types.CallDirection
 import com.twilio.twilio_voice.types.CompletionHandler
 import com.twilio.twilio_voice.types.ContextExtension.appName
 import com.twilio.twilio_voice.types.IntentExtension.getParcelableExtraSafe
+import com.twilio.twilio_voice.types.TVNativeCallEvents
 import com.twilio.twilio_voice.types.ValueBundleChanged
 import com.twilio.voice.*
 import com.twilio.voice.Call
 
-class TVConnectionService : Service() {
+class TVConnectionService : Service(), TVAudioManager.RingAudioFocusListener {
 
     companion object {
         val TAG = "TwilioVoiceConnectionService"
@@ -187,6 +188,12 @@ class TVConnectionService : Service() {
          * Extra used with [ACTION_TOGGLE_MUTE] to send additional parameters to the [TVCallConnection] active call.
          */
         const val EXTRA_MUTE_STATE: String = "EXTRA_MUTE_STATE"
+
+        /**
+         * Extra used with [TVNativeCallEvents.EVENT_AUTO_DECLINED] carrying why the invite was
+         * rejected — on a call, or already ringing.
+         */
+        const val EXTRA_AUTO_DECLINE_REASON: String = "EXTRA_AUTO_DECLINE_REASON"
         //endregion
 
         fun hasActiveCalls(): Boolean {
@@ -218,6 +225,50 @@ class TVConnectionService : Service() {
 
     private val ringer: TVRinger by lazy { TVRinger(applicationContext) }
 
+    /**
+     * Starts the ringtone and takes audio focus for it, reporting whether the notification can
+     * stay silent — either because the device was alerted, or because it deliberately must not
+     * be. Focus and ringtone are started and stopped together through this pair so the two
+     * lifecycles cannot drift apart.
+     */
+    private fun startRinging(): Boolean {
+        val audio = TVAudioManager.getInstance(applicationContext)
+        if (!audio.onRingingStarted(this) && audio.isDeviceRinging()) {
+            // Focus is only refused when an owner holds the audio exclusively, and the telephony
+            // ringer is the thing that does that. So the handset began ringing in the gap between
+            // the guard and here: a second ringtone is the exact problem this change exists to
+            // prevent, and with no focus there would be no callback to silence it afterwards.
+            // Reported as alerted so the notification does not supply a tone of its own either —
+            // the handset is already making one.
+            Log.i(TAG, "startRinging: the handset started ringing as this call arrived — presenting it silently")
+            return true
+        }
+        return ringer.start()
+    }
+
+    private fun stopRinging() {
+        ringer.stop()
+        TVAudioManager.getInstance(applicationContext).onRingingEnded()
+    }
+
+    //region TVAudioManager.RingAudioFocusListener
+    /**
+     * Something else took the audio while we were ringing — almost always a cellular call
+     * arriving second. Silence the ringtone but leave the invite, the notification and the
+     * ringing Activity alone: the rep can still take this call once they have dealt with the
+     * other one, and a focus loss is not reliable enough to throw a real call away on.
+     */
+    override fun onRingFocusLost() {
+        ringer.stop()
+    }
+
+    override fun onRingFocusRegained() {
+        // Only if an invite is still ringing — the focus may come back after the caller gave up.
+        if (getIncomingCallHandle() == null) return
+        ringer.start()
+    }
+    //endregion
+
     private val audioStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             refreshOngoingNotification()
@@ -232,7 +283,7 @@ class TVConnectionService : Service() {
 
     override fun onDestroy() {
         LocalBroadcastManager.getInstance(applicationContext).unregisterReceiver(audioStateReceiver)
-        ringer.stop()
+        stopRinging()
         super.onDestroy()
     }
 
@@ -293,7 +344,7 @@ class TVConnectionService : Service() {
                 }
 
                 ACTION_CANCEL_CALL_INVITE -> {
-                    ringer.stop()
+                    stopRinging()
 
                     // Load CancelledCallInvite class loader
                     // See: https://github.com/twilio/voice-quickstart-android/issues/561#issuecomment-1678613170
@@ -331,9 +382,23 @@ class TVConnectionService : Service() {
                     // Rejecting rather than ringing silently also tells the caller's flow
                     // straight away, so it moves to the next person instead of waiting
                     // out a ring timeout nobody is going to answer.
-                    if (TVAudioManager.getInstance(applicationContext).isOnCellularCall()) {
-                        Log.i(TAG, "onStartCommand: [ACTION_INCOMING_CALL] rejecting ${callInvite.callSid} — already on a native call")
+                    //
+                    // A handset that is merely *ringing* counts too: both ringtones are the
+                    // device default, so ringing over it gives the rep one doubled tone and
+                    // two full-screen call screens competing for the foreground.
+                    val audio = TVAudioManager.getInstance(applicationContext)
+                    val declineReason = when {
+                        audio.isOnCellularCall() -> "already on a native call"
+                        audio.isDeviceRinging() -> "the handset is already ringing"
+                        else -> null
+                    }
+                    if (declineReason != null) {
+                        Log.i(TAG, "onStartCommand: [ACTION_INCOMING_CALL] rejecting ${callInvite.callSid} — $declineReason")
                         callInvite.reject(applicationContext)
+                        // A rejection is indistinguishable from a rep tapping Decline once it
+                        // reaches Twilio (both land as `busy`), so say so on the way out — it
+                        // is the only way to count how often this fires in production.
+                        broadcastAutoDeclined(callInvite.callSid, declineReason)
                         // Started via startForegroundService, so we must still reach
                         // startForeground before stopping or the system kills the app.
                         startForegroundThenStopIfIdle()
@@ -357,14 +422,14 @@ class TVConnectionService : Service() {
                     // Ring first so the notification can carry the alert itself when
                     // the ringer produced nothing — otherwise the call arrives with no
                     // sound and no vibration, and nothing says why.
-                    val alerted = ringer.start()
+                    val alerted = startRinging()
 
                     // Present a full-screen-intent notification + native ringing Activity instead of the system's Telecom incoming call UI
                     startIncomingCallForeground(callInvite.callSid, connection.callerDisplayName ?: callParams.from, alerted)
                 }
 
                 ACTION_ANSWER -> {
-                    ringer.stop()
+                    stopRinging()
 
                     val callHandle = it.getStringExtra(EXTRA_CALL_HANDLE) ?: getIncomingCallHandle() ?: run {
                         Log.e(TAG, "onStartCommand: ACTION_ANSWER is missing String EXTRA_CALL_HANDLE")
@@ -390,7 +455,7 @@ class TVConnectionService : Service() {
                 }
 
                 ACTION_REJECT -> {
-                    ringer.stop()
+                    stopRinging()
 
                     val callHandle = it.getStringExtra(EXTRA_CALL_HANDLE) ?: getIncomingCallHandle() ?: run {
                         Log.e(TAG, "onStartCommand: ACTION_REJECT is missing String EXTRA_CALL_HANDLE")
@@ -484,7 +549,7 @@ class TVConnectionService : Service() {
 
                     // Set call disconnected listener, removes connection from active connections when call is disconnected
                     val onCallInitializingDisconnectedListener: CompletionHandler<DisconnectCause> = CompletionHandler {
-                        ringer.stop()
+                        stopRinging()
                         connection.twilioCall?.let { call ->
                             if (activeConnections.containsKey(call.sid)) {
                                 activeConnections.remove(call.sid)
@@ -587,7 +652,7 @@ class TVConnectionService : Service() {
             sendBroadcastCallHandle(applicationContext, extra?.getString(TVBroadcastReceiver.EXTRA_CALL_HANDLE))
         }
         val onDisconnect: CompletionHandler<DisconnectCause> = CompletionHandler {
-            ringer.stop()
+            stopRinging()
             if (activeConnections.containsKey(callSid)) {
                 activeConnections.remove(callSid)
             }
@@ -597,13 +662,13 @@ class TVConnectionService : Service() {
         val onCallState: CompletionHandler<Call.State> = CompletionHandler { state ->
             when (state) {
                 Call.State.CONNECTED -> {
-                    ringer.stop()
+                    stopRinging()
                     // Swap the ringing full-screen notification for the ordinary ongoing call
                     // notification, now claiming the microphone the connected call is using.
                     startForegroundService(wantMicrophone = true)
                 }
                 Call.State.DISCONNECTED -> {
-                    ringer.stop()
+                    stopRinging()
                     if (activeConnections.containsKey(callSid)) {
                         activeConnections.remove(callSid)
                     }
@@ -646,6 +711,15 @@ class TVConnectionService : Service() {
      */
     private fun broadcastCallGone(callHandle: String) {
         sendBroadcastEvent(applicationContext, TVBroadcastReceiver.ACTION_CALL_ENDED, callHandle)
+    }
+
+    private fun broadcastAutoDeclined(callSid: String, reason: String) {
+        sendBroadcastEvent(
+            applicationContext,
+            TVNativeCallEvents.EVENT_AUTO_DECLINED,
+            callSid,
+            Bundle().apply { putString(EXTRA_AUTO_DECLINE_REASON, reason) },
+        )
     }
 
     private fun sendBroadcastEvent(ctx: Context, event: String, callSid: String?, extras: Bundle? = null) {

@@ -396,6 +396,15 @@ class MethodChannelTwilioVoice extends TwilioVoicePlatform {
       return CallEvent.returningCall;
     } else if (state.startsWith("Reconnecting")) {
       return CallEvent.reconnecting;
+    } else if (state.startsWith("AutoDeclined|")) {
+      // The app rejected the invite for the rep, because the handset was already on a
+      // call or already ringing. The reason rides along for the logs; the event itself
+      // is what separates this from the rep tapping Decline.
+      if (kDebugMode) {
+        printDebug('Auto declined - reason: ${state.split('|')[1]}');
+      }
+      call.activeCall = null;
+      return CallEvent.autoDeclined;
     }
     switch (state) {
       case 'Ringing':

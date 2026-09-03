@@ -80,6 +80,7 @@ class _CallControlsState extends State<CallControls> {
         case CallEvent.declined:
         case CallEvent.callEnded:
         case CallEvent.missedCall:
+        case CallEvent.autoDeclined:
         case CallEvent.returningCall:
         case CallEvent.log:
           _updateState();

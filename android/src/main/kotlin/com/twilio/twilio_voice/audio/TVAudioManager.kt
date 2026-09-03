@@ -38,11 +38,32 @@ class TVAudioManager private constructor(context: Context) {
         fun onAudioFocusRegained()
     }
 
+    /**
+     * How a *ringing* invite is told to stop making noise while something else owns the audio.
+     *
+     * Separate from [CallAudioFocusListener] because a ringing call has no media to hold — the
+     * only thing worth suspending is the ringtone, and the ringer belongs to the service rather
+     * than the connection. Silencing instead of rejecting keeps the invite available: a focus
+     * loss is not proof of a phone call, so discarding the call on one would lose real calls.
+     */
+    interface RingAudioFocusListener {
+        fun onRingFocusLost()
+        fun onRingFocusRegained()
+    }
+
     private val appContext = context.applicationContext
     private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val handler = Handler(Looper.getMainLooper())
 
     private var focusRequest: AudioFocusRequest? = null
+
+    // Ring-phase focus is held separately from the active-call fields below: answering runs
+    // onCallActive() while the ring focus is still held, and sharing one slot would leak the
+    // ring request and hand the call's listener a stale phase.
+    private var ringFocusRequest: AudioFocusRequest? = null
+    private var ringFocusListener: RingAudioFocusListener? = null
+    private var ringFocusLost: Boolean = false
+
     private var previousMode: Int = AudioManager.MODE_NORMAL
     private var previousSpeakerphoneOn: Boolean = false
     private var isActive: Boolean = false
@@ -69,6 +90,9 @@ class TVAudioManager private constructor(context: Context) {
 
     fun onCallActive(listener: CallAudioFocusListener? = null) {
         if (isActive) return
+        // Answering an invite we were ringing for: drop the ringtone's focus before asking for
+        // the call's, or the ring request stays on the focus stack for the life of the process.
+        onRingingEnded()
         isActive = true
         routeChosenByUser = false
         focusListener = listener
@@ -143,6 +167,24 @@ class TVAudioManager private constructor(context: Context) {
      * READ_PHONE_STATE runtime grant the host app does not ask for.
      */
     fun isOnCellularCall(): Boolean = audioManager.mode == AudioManager.MODE_IN_CALL
+
+    /**
+     * Whether the handset is already ringing for someone else.
+     *
+     * [isOnCellularCall] only sees a call that has been *answered* — the telephony stack sets
+     * `MODE_IN_CALL` at that point and not before — so a cellular call that is merely ringing
+     * used to pass straight through the guard, and we rang over the top of it. Both ringtones
+     * are the device default (see `TVRinger`), so the rep heard one tone doubled and had two
+     * full-screen call screens fighting for the foreground.
+     *
+     * `MODE_RINGTONE` is not proof that the other caller is on the *cellular* network: another
+     * VoIP app ringing sets it too. That is deliberate — a rep already being rung by someone is
+     * unavailable either way, and telling the two apart would need the `READ_PHONE_STATE`
+     * runtime grant this plugin avoids (see the note on [isOnCellularCall]).
+     *
+     * Verified on API 30 and API 34: ringing reports `MODE_RINGTONE`, answering `MODE_IN_CALL`.
+     */
+    fun isDeviceRinging(): Boolean = audioManager.mode == AudioManager.MODE_RINGTONE
 
     /**
      * One entry per output the user can send the call to.
@@ -442,6 +484,88 @@ class TVAudioManager private constructor(context: Context) {
     private fun abandonAudioFocus() {
         focusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
         focusRequest = null
+    }
+
+    /**
+     * Takes focus for the ringtone, so a cellular call arriving *while we ring* is noticed.
+     *
+     * A *granted* request is deliberately not read as a verdict on whether the handset is
+     * ringing: `AUDIOFOCUS_GAIN_TRANSIENT` is granted unless the current owner took it
+     * exclusively, and the telephony ringer holds a plain one. [isDeviceRinging] answers that
+     * question before we ever get here. What holding focus buys is the loss and gain
+     * callbacks: without them we are never told that something else took the audio, which is
+     * the whole of the reverse direction.
+     *
+     * A *refused* request does carry information, so it is reported rather than swallowed —
+     * refusal means an owner holds the audio exclusively, and the telephony ringer is exactly
+     * the thing that does that (`AUDIOFOCUS_FLAG_LOCK`). Only a granted request is recorded:
+     * keeping one we do not hold would leave [onRingingEnded] abandoning nothing, block a
+     * later attempt, and promise a silencing callback that can never arrive.
+     *
+     * `USAGE_NOTIFICATION_RINGTONE` matches what `TVRinger` plays with, so the request
+     * describes the sound it is actually protecting.
+     *
+     * @return whether focus is held, i.e. whether the ringtone can still be silenced later.
+     * Also `false` when there is deliberately nothing to protect (see the ringer-mode check).
+     */
+    fun onRingingStarted(listener: RingAudioFocusListener): Boolean {
+        if (ringFocusRequest != null) return true
+        // Nothing to protect on a silenced or vibrate-only handset: `TVRinger` plays no tone,
+        // there is no doubled sound to prevent, and taking focus would pause whatever the rep
+        // is listening to for the length of a ring they cannot hear anyway.
+        if (audioManager.ringerMode != AudioManager.RINGER_MODE_NORMAL) return false
+        val attributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+            .setAudioAttributes(attributes)
+            .setOnAudioFocusChangeListener(onRingFocusChange, handler)
+            .build()
+        if (audioManager.requestAudioFocus(request) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            Log.w(TAG, "onRingingStarted: audio focus refused, this ringtone cannot be silenced")
+            return false
+        }
+        ringFocusRequest = request
+        ringFocusListener = listener
+        ringFocusLost = false
+        return true
+    }
+
+    /** Releases the ringtone's focus. Safe to call when no invite is ringing. */
+    fun onRingingEnded() {
+        ringFocusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+        ringFocusRequest = null
+        ringFocusListener = null
+        ringFocusLost = false
+    }
+
+    /**
+     * A duckable loss is a chime, not a conversation, so the ringtone plays on — going quiet
+     * for a notification tone would be worse than the tone. Anything else means something took
+     * the audio, and a rep cannot pick out our ringtone from underneath it.
+     */
+    private val onRingFocusChange = AudioManager.OnAudioFocusChangeListener { change ->
+        when (change) {
+            AudioManager.AUDIOFOCUS_LOSS,
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                if (!ringFocusLost) {
+                    ringFocusLost = true
+                    Log.i(TAG, "onRingFocusChange: lost audio focus while ringing, silencing the ringtone")
+                    ringFocusListener?.onRingFocusLost()
+                }
+            }
+
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                if (ringFocusLost) {
+                    ringFocusLost = false
+                    Log.i(TAG, "onRingFocusChange: focus back while still ringing, resuming the ringtone")
+                    ringFocusListener?.onRingFocusRegained()
+                }
+            }
+
+            else -> Unit
+        }
     }
 
     @Suppress("DEPRECATION")
