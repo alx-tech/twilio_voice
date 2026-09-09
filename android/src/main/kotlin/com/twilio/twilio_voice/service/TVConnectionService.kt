@@ -386,9 +386,17 @@ class TVConnectionService : Service(), TVAudioManager.RingAudioFocusListener {
                     // A handset that is merely *ringing* counts too: both ringtones are the
                     // device default, so ringing over it gives the rep one doubled tone and
                     // two full-screen call screens competing for the foreground.
+                    //
+                    // A call we are already carrying ourselves counts as well, and neither
+                    // audio check sees it: our own call runs in MODE_IN_COMMUNICATION, so
+                    // isOnCellularCall() (MODE_IN_CALL) and isDeviceRinging() (MODE_RINGTONE)
+                    // are both false throughout. This invite is not in activeConnections yet
+                    // — that happens in attachCallEventListeners below — so the check cannot
+                    // reject the call it is currently processing.
                     val audio = TVAudioManager.getInstance(applicationContext)
                     val declineReason = when {
                         audio.isOnCellularCall() -> "already on a native call"
+                        hasActiveCalls() -> "already on an INFINIT call"
                         audio.isDeviceRinging() -> "the handset is already ringing"
                         else -> null
                     }
