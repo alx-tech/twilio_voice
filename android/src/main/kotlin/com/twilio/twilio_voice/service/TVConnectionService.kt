@@ -201,6 +201,27 @@ class TVConnectionService : Service(), TVAudioManager.RingAudioFocusListener {
         }
 
         /**
+         * Why an incoming invite should be declined because we are already carrying a call,
+         * or null when we are free to take it.
+         *
+         * Deliberately not [hasActiveCalls]: that is true for any cached connection, so it
+         * cannot tell a live conversation from a call that is merely ringing, and the reason
+         * it produces is reported as telemetry. It also counts a connection that has already
+         * disconnected but not yet been evicted from [activeConnections] by its removal
+         * callback — treating one of those as live would latch the guard and block every
+         * later call, which is worse than the overlap the guard exists to prevent.
+         */
+        fun ongoingCallDeclineReason(): String? {
+            val live = activeConnections.values.filter { it.state != TVCallConnection.STATE_DISCONNECTED }
+            return when {
+                live.any { it.state == TVCallConnection.STATE_ACTIVE || it.state == TVCallConnection.STATE_HOLDING } ->
+                    "already on an INFINIT call"
+                live.isNotEmpty() -> "already ringing or dialling another INFINIT call"
+                else -> null
+            }
+        }
+
+        /**
          * Active call definition is extended to include calls in which one can actively communicate, or call is on hold, or call is ringing or dialing. This applies only to this and calling functions.
          * Gets the first ongoing call handle, if any. Else, gets the first call on hold. Lastly, gets the first call in either a ringing or dialing state, if any. Returns null if there are no active calls. If there are more than one active calls, the first call handle is returned.
          * Note: this might not necessarily correspond to the current active call.
@@ -394,9 +415,10 @@ class TVConnectionService : Service(), TVAudioManager.RingAudioFocusListener {
                     // — that happens in attachCallEventListeners below — so the check cannot
                     // reject the call it is currently processing.
                     val audio = TVAudioManager.getInstance(applicationContext)
+                    val ongoingCallReason = ongoingCallDeclineReason()
                     val declineReason = when {
                         audio.isOnCellularCall() -> "already on a native call"
-                        hasActiveCalls() -> "already on an INFINIT call"
+                        ongoingCallReason != null -> ongoingCallReason
                         audio.isDeviceRinging() -> "the handset is already ringing"
                         else -> null
                     }
