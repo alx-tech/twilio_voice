@@ -85,6 +85,12 @@ class TVAudioManager private constructor(context: Context) {
 
     private var deviceCallback: AudioDeviceCallback? = null
 
+    /**
+     * The Bluetooth device the call is on (API 31+), so a second paired device going out of
+     * range does not drop the call, and a resume puts it back on the same one.
+     */
+    private var bluetoothDeviceId: Int? = null
+
     var isSpeakerOn: Boolean = false
         private set
     var isBluetoothOn: Boolean = false
@@ -106,9 +112,10 @@ class TVAudioManager private constructor(context: Context) {
             Log.w(TAG, "onCallActive: audio focus was refused, call audio may be inaudible")
         }
         registerDeviceCallback()
-        routeToHandset()
         isSpeakerOn = false
         isBluetoothOn = false
+        bluetoothDeviceId = null
+        routeToHandset()
     }
 
     fun onCallEnded() {
@@ -127,9 +134,8 @@ class TVAudioManager private constructor(context: Context) {
         val nativeCallInProgress = isOnCellularCall()
         if (nativeCallInProgress) {
             Log.i(TAG, "onCallEnded: a native call is still in progress, leaving audio mode and route alone")
-        } else {
-            releaseRoute()
         }
+        releaseRoute(nativeCallInProgress)
         abandonAudioFocus()
         if (!nativeCallInProgress) {
             audioManager.mode = previousMode
@@ -138,18 +144,25 @@ class TVAudioManager private constructor(context: Context) {
         }
         isSpeakerOn = false
         isBluetoothOn = false
+        bluetoothDeviceId = null
     }
 
     fun setSpeakerphone(on: Boolean): Boolean {
+        if (!on && !isSpeakerOn) return true
         val result = if (on) setRoute(true, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) else routeToHandset()
         isSpeakerOn = on
-        if (on) isBluetoothOn = false
+        if (on) {
+            isBluetoothOn = false
+            bluetoothDeviceId = null
+        }
         return result
     }
 
     fun setBluetooth(on: Boolean): Boolean {
-        val result = if (on) routeToBluetooth(true) else routeToHandset()
+        if (!on && !isBluetoothOn) return true
+        val result = if (on) routeToBluetooth() else routeToHandset()
         isBluetoothOn = on && result
+        if (!isBluetoothOn) bluetoothDeviceId = null
         if (on && result) isSpeakerOn = false
         return result
     }
@@ -228,6 +241,7 @@ class TVAudioManager private constructor(context: Context) {
                 if (it) {
                     isSpeakerOn = device.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
                     isBluetoothOn = device.type in BLUETOOTH_TYPES
+                    bluetoothDeviceId = if (isBluetoothOn) device.id else null
                 }
             }
         } else {
@@ -270,7 +284,9 @@ class TVAudioManager private constructor(context: Context) {
                 audioManager.clearCommunicationDevice()
                 return true
             }
-            return audioManager.setCommunicationDevice(device)
+            return audioManager.setCommunicationDevice(device).also {
+                if (!it) Log.w(TAG, "routeToHandset: could not select ${device.type}, the call may be on the platform default")
+            }
         }
         @Suppress("DEPRECATION")
         audioManager.stopBluetoothSco()
@@ -279,33 +295,52 @@ class TVAudioManager private constructor(context: Context) {
         return true
     }
 
+    /** Below API 31 there is one combined Bluetooth route, so any Bluetooth loss is ours. */
+    private fun lostDeviceInUse(removedDevices: Array<out AudioDeviceInfo>?): Boolean {
+        val removed = removedDevices.orEmpty()
+        val inUse = bluetoothDeviceId
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && inUse != null) {
+            return removed.any { it.id == inUse }
+        }
+        return removed.any { it.type in BLUETOOTH_TYPES }
+    }
+
     private fun isOnHandset(): Boolean = isActive && !isSpeakerOn && !isBluetoothOn
 
-    /** Hands the output back to the platform once our call is over. */
-    private fun releaseRoute() {
+    /**
+     * Hands the output back to the platform once our call is over.
+     *
+     * From API 31 this only withdraws our own request, so it is safe during a native call
+     * and must happen then too, or our earpiece choice outlives the call. The legacy SCO
+     * switch is global, so it is left alone while the handset is in use.
+     */
+    private fun releaseRoute(nativeCallInProgress: Boolean) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             audioManager.clearCommunicationDevice()
             return
         }
-        @Suppress("DEPRECATION")
-        audioManager.stopBluetoothSco()
+        if (!nativeCallInProgress) {
+            @Suppress("DEPRECATION")
+            audioManager.stopBluetoothSco()
+        }
     }
 
-    private fun routeToBluetooth(on: Boolean): Boolean {
+    /** Sends the call to the Bluetooth device in use if it is still there, else the first one. */
+    private fun routeToBluetooth(): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (!on) {
-                audioManager.clearCommunicationDevice()
-                return true
-            }
-            val device = audioManager.availableCommunicationDevices.firstOrNull { it.type in BLUETOOTH_TYPES }
+            val devices = audioManager.availableCommunicationDevices.filter { it.type in BLUETOOTH_TYPES }
+            val device = devices.firstOrNull { it.id == bluetoothDeviceId } ?: devices.firstOrNull()
             if (device == null) {
                 Log.w(TAG, "routeToBluetooth: no Bluetooth communication device available")
                 return false
             }
-            return audioManager.setCommunicationDevice(device)
+            return audioManager.setCommunicationDevice(device).also { if (it) bluetoothDeviceId = device.id }
         }
+        // The speakerphone outranks SCO, so leaving it on would keep the audio on the speaker.
         @Suppress("DEPRECATION")
-        if (on) audioManager.startBluetoothSco() else audioManager.stopBluetoothSco()
+        audioManager.isSpeakerphoneOn = false
+        @Suppress("DEPRECATION")
+        audioManager.startBluetoothSco()
         return true
     }
 
@@ -331,10 +366,10 @@ class TVAudioManager private constructor(context: Context) {
             }
 
             override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
-                val lostBluetooth = removedDevices?.any { it.type in BLUETOOTH_TYPES } == true
                 val lostWired = removedDevices?.any { it.type in WIRED_TYPES } == true
-                if (lostBluetooth && isBluetoothOn) {
+                if (isBluetoothOn && lostDeviceInUse(removedDevices)) {
                     isBluetoothOn = false
+                    bluetoothDeviceId = null
                     routeToHandset()
                 } else if (lostWired && isOnHandset()) {
                     routeToHandset()
@@ -479,7 +514,7 @@ class TVAudioManager private constructor(context: Context) {
     /** Puts the call back on the output it was using before the interruption. */
     private fun reapplyRoute() {
         when {
-            isBluetoothOn -> routeToBluetooth(true)
+            isBluetoothOn -> routeToBluetooth()
             isSpeakerOn -> setRoute(true, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
             else -> routeToHandset()
         }

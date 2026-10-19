@@ -299,7 +299,10 @@ class TVConnectionService : Service(), TVAudioManager.RingAudioFocusListener {
     override fun onCreate() {
         super.onCreate()
         LocalBroadcastManager.getInstance(applicationContext)
-            .registerReceiver(audioStateReceiver, IntentFilter(TVBroadcastReceiver.ACTION_AUDIO_STATE))
+            .registerReceiver(audioStateReceiver, IntentFilter().apply {
+                addAction(TVBroadcastReceiver.ACTION_AUDIO_STATE)
+                addAction(TVBroadcastReceiver.ACTION_AUDIO_ROUTES_CHANGED)
+            })
     }
 
     override fun onDestroy() {
