@@ -1,6 +1,7 @@
 package com.twilio.twilio_voice.audio
 
 import android.content.Context
+import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
@@ -11,14 +12,16 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import com.twilio.twilio_voice.receivers.TVBroadcastReceiver
 
 /**
  * Owns call audio routing.
  *
  * The FSI rewrite replaced the Telecom ConnectionService with a plain service, so the OS
- * no longer picks a route for us. Without the work below a call always lands on the
- * earpiece even with a headset already connected, and nothing reacts to one being
- * connected mid-call.
+ * no longer picks a route for us. A call starts on the handset (or a wired headset) and
+ * goes to Bluetooth only when the user picks it: a paired device the rep is not wearing
+ * would otherwise take the call silently, and a dead microphone is all anyone would see.
  *
  * Telecom also used to arbitrate between an app call and a call on the handset. It no
  * longer does, so [CallAudioFocusListener] carries that duty: losing audio focus — which
@@ -53,6 +56,7 @@ class TVAudioManager private constructor(context: Context) {
 
     private val appContext = context.applicationContext
     private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private val broadcastManager = LocalBroadcastManager.getInstance(appContext)
     private val handler = Handler(Looper.getMainLooper())
 
     private var focusRequest: AudioFocusRequest? = null
@@ -79,8 +83,6 @@ class TVAudioManager private constructor(context: Context) {
      */
     private var sawNativeCall: Boolean = false
 
-    /** Set once the user picks a route by hand, so automatic routing stops fighting them. */
-    private var routeChosenByUser: Boolean = false
     private var deviceCallback: AudioDeviceCallback? = null
 
     var isSpeakerOn: Boolean = false
@@ -94,7 +96,6 @@ class TVAudioManager private constructor(context: Context) {
         // the call's, or the ring request stays on the focus stack for the life of the process.
         onRingingEnded()
         isActive = true
-        routeChosenByUser = false
         focusListener = listener
         previousMode = audioManager.mode
         previousSpeakerphoneOn = audioManager.isSpeakerphoneOn
@@ -105,13 +106,14 @@ class TVAudioManager private constructor(context: Context) {
             Log.w(TAG, "onCallActive: audio focus was refused, call audio may be inaudible")
         }
         registerDeviceCallback()
-        applyPreferredRoute()
+        routeToHandset()
+        isSpeakerOn = false
+        isBluetoothOn = false
     }
 
     fun onCallEnded() {
         if (!isActive) return
         isActive = false
-        routeChosenByUser = false
         focusLost = false
         focusLostPermanently = false
         sawNativeCall = false
@@ -126,8 +128,7 @@ class TVAudioManager private constructor(context: Context) {
         if (nativeCallInProgress) {
             Log.i(TAG, "onCallEnded: a native call is still in progress, leaving audio mode and route alone")
         } else {
-            setSpeakerphone(false)
-            setBluetooth(false)
+            releaseRoute()
         }
         abandonAudioFocus()
         if (!nativeCallInProgress) {
@@ -140,16 +141,14 @@ class TVAudioManager private constructor(context: Context) {
     }
 
     fun setSpeakerphone(on: Boolean): Boolean {
-        if (isActive) routeChosenByUser = true
-        val result = setRoute(on, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+        val result = if (on) setRoute(true, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) else routeToHandset()
         isSpeakerOn = on
         if (on) isBluetoothOn = false
         return result
     }
 
     fun setBluetooth(on: Boolean): Boolean {
-        if (isActive) routeChosenByUser = true
-        val result = routeToBluetooth(on)
+        val result = if (on) routeToBluetooth(true) else routeToHandset()
         isBluetoothOn = on && result
         if (on && result) isSpeakerOn = false
         return result
@@ -215,35 +214,31 @@ class TVAudioManager private constructor(context: Context) {
     /**
      * Sends call audio to the route with [routeId] from [availableRoutes].
      *
-     * Counts as a user choice, so automatic routing will not override it afterwards.
+     * The choice holds for this call only; the next call starts on the handset again.
      */
     fun selectRoute(routeId: Int): Boolean {
         if (!isActive) return false
-        routeChosenByUser = true
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        val applied = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val device = audioManager.availableCommunicationDevices.firstOrNull { it.id == routeId }
             if (device == null) {
                 Log.w(TAG, "selectRoute: route $routeId is no longer available")
                 return false
             }
-            // The earpiece is the platform default, so clearing beats selecting it.
-            val applied = if (device.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE) {
-                audioManager.clearCommunicationDevice()
-                true
-            } else {
-                audioManager.setCommunicationDevice(device)
+            audioManager.setCommunicationDevice(device).also {
+                if (it) {
+                    isSpeakerOn = device.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+                    isBluetoothOn = device.type in BLUETOOTH_TYPES
+                }
             }
-            if (applied) {
-                isSpeakerOn = device.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
-                isBluetoothOn = device.type in BLUETOOTH_TYPES
+        } else {
+            when (routeId) {
+                LEGACY_SPEAKER_ID -> setSpeakerphone(true)
+                LEGACY_BLUETOOTH_ID -> setBluetooth(true)
+                else -> setBluetooth(false) && setSpeakerphone(false)
             }
-            return applied
         }
-        return when (routeId) {
-            LEGACY_SPEAKER_ID -> setSpeakerphone(true)
-            LEGACY_BLUETOOTH_ID -> setBluetooth(true)
-            else -> setBluetooth(false) && setSpeakerphone(false)
-        }
+        if (applied) broadcastRoutesChanged()
+        return applied
     }
 
     /** Label for a route, falling back to the type when a device reports no name. */
@@ -259,23 +254,41 @@ class TVAudioManager private constructor(context: Context) {
     }
 
     /**
-     * Routes to a connected Bluetooth headset unless the user has chosen otherwise.
+     * Puts the call on the handset: a wired or USB headset if one is plugged in, otherwise
+     * the earpiece.
      *
-     * With no headset connected the platform default (earpiece) is left alone.
+     * Selected explicitly rather than by clearing the communication device, because with a
+     * Bluetooth headset connected the platform default can be that headset — which is the
+     * very route this exists to avoid.
      */
-    private fun applyPreferredRoute() {
-        if (!isActive || routeChosenByUser) return
-        if (bluetoothOutput() == null) return
-        if (routeToBluetooth(true)) {
-            isBluetoothOn = true
-            isSpeakerOn = false
-            Log.d(TAG, "applyPreferredRoute: routed call audio to Bluetooth")
-        } else {
-            // Most likely a missing BLUETOOTH_CONNECT grant on API 31+: the headset is
-            // connected but we are not allowed to route to it. Logged at error because
-            // the symptom is a silent headset with nothing else to go on.
-            Log.e(TAG, "applyPreferredRoute: a Bluetooth headset is connected but routing to it failed")
+    private fun routeToHandset(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val devices = audioManager.availableCommunicationDevices
+            val device = HANDSET_TYPES.firstNotNullOfOrNull { type -> devices.firstOrNull { it.type == type } }
+            if (device == null) {
+                // No earpiece at all (a tablet): the platform default is the only option.
+                audioManager.clearCommunicationDevice()
+                return true
+            }
+            return audioManager.setCommunicationDevice(device)
         }
+        @Suppress("DEPRECATION")
+        audioManager.stopBluetoothSco()
+        @Suppress("DEPRECATION")
+        audioManager.isSpeakerphoneOn = false
+        return true
+    }
+
+    private fun isOnHandset(): Boolean = isActive && !isSpeakerOn && !isBluetoothOn
+
+    /** Hands the output back to the platform once our call is over. */
+    private fun releaseRoute() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            audioManager.clearCommunicationDevice()
+            return
+        }
+        @Suppress("DEPRECATION")
+        audioManager.stopBluetoothSco()
     }
 
     private fun routeToBluetooth(on: Boolean): Boolean {
@@ -301,26 +314,32 @@ class TVAudioManager private constructor(context: Context) {
         audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { it.type in BLUETOOTH_TYPES }
 
     /**
-     * Re-applies the preferred route as devices come and go, so a headset connected after
-     * the call started is used, and disconnecting one falls back to what is left.
+     * Tells the call screens when outputs come and go, so they can offer a headset that
+     * connected mid-call. A new device never takes the call by itself; losing the one in
+     * use falls back to the handset.
      */
     private fun registerDeviceCallback() {
         if (deviceCallback != null) return
         val callback = object : AudioDeviceCallback() {
             override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
-                applyPreferredRoute()
+                // Plugging a headset in is a deliberate act, unlike a paired device coming
+                // into range, so a wired one still takes a call that is on the handset.
+                if (isOnHandset() && addedDevices?.any { it.type in WIRED_TYPES } == true) {
+                    routeToHandset()
+                }
+                broadcastRoutesChanged()
             }
 
             override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
                 val lostBluetooth = removedDevices?.any { it.type in BLUETOOTH_TYPES } == true
+                val lostWired = removedDevices?.any { it.type in WIRED_TYPES } == true
                 if (lostBluetooth && isBluetoothOn) {
-                    // The chosen route physically went away, so that choice no longer
-                    // applies and audio should follow whatever is still connected.
                     isBluetoothOn = false
-                    routeChosenByUser = false
-                    routeToBluetooth(false)
-                    applyPreferredRoute()
+                    routeToHandset()
+                } else if (lostWired && isOnHandset()) {
+                    routeToHandset()
                 }
+                broadcastRoutesChanged()
             }
         }
         deviceCallback = callback
@@ -330,6 +349,11 @@ class TVAudioManager private constructor(context: Context) {
     private fun unregisterDeviceCallback() {
         deviceCallback?.let { audioManager.unregisterAudioDeviceCallback(it) }
         deviceCallback = null
+    }
+
+    private fun broadcastRoutesChanged() {
+        if (!isActive) return
+        broadcastManager.sendBroadcast(Intent(TVBroadcastReceiver.ACTION_AUDIO_ROUTES_CHANGED))
     }
 
     /**
@@ -457,8 +481,7 @@ class TVAudioManager private constructor(context: Context) {
         when {
             isBluetoothOn -> routeToBluetooth(true)
             isSpeakerOn -> setRoute(true, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
-            routeChosenByUser -> setRoute(false, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
-            else -> applyPreferredRoute()
+            else -> routeToHandset()
         }
     }
 
@@ -609,6 +632,15 @@ class TVAudioManager private constructor(context: Context) {
             add(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) add(AudioDeviceInfo.TYPE_BLE_HEADSET)
         }
+
+        private val WIRED_TYPES: List<Int> = listOf(
+            AudioDeviceInfo.TYPE_WIRED_HEADSET,
+            AudioDeviceInfo.TYPE_USB_HEADSET,
+            AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+        )
+
+        /** Where a call starts, in order of preference: a plugged-in headset beats the earpiece. */
+        private val HANDSET_TYPES: List<Int> = WIRED_TYPES + AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
 
         /** Outputs worth offering the user; anything else is not a call destination. */
         private val SELECTABLE_TYPES: Set<Int> = BLUETOOTH_TYPES + setOf(

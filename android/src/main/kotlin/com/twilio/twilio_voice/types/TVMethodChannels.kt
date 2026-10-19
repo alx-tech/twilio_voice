@@ -8,6 +8,8 @@ enum class TVMethodChannels(val method: String) {
     IS_ON_SPEAKER("isOnSpeaker"),
     TOGGLE_BLUETOOTH("toggleBluetooth"),
     IS_BLUETOOTH_ON("isBluetoothOn"),
+    GET_AUDIO_ROUTES("getAudioRoutes"),
+    SELECT_AUDIO_ROUTE("selectAudioRoute"),
     TOGGLE_MUTE("toggleMute"),
     IS_MUTED("isMuted"),
     CALL_SID("call-sid"),

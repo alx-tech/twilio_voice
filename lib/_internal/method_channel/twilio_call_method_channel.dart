@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:twilio_voice/twilio_voice.dart';
 
@@ -112,6 +113,21 @@ class MethodChannelTwilioCall extends TwilioCallPlatform {
   @override
   Future<bool?> isBluetoothOn() {
     return _channel.invokeMethod('isBluetoothOn', <String, dynamic>{});
+  }
+
+  // Android only: CallKit owns the output picker on iOS, whose handler answers `true` to any
+  // method it does not know, so asking it would return a bool where a list is expected.
+  @override
+  Future<List<AudioRoute>> getAudioRoutes() async {
+    if (defaultTargetPlatform != TargetPlatform.android) return const [];
+    final routes = await _channel.invokeListMethod<Map<dynamic, dynamic>>('getAudioRoutes', <String, dynamic>{});
+    return routes?.map(AudioRoute.fromMap).toList() ?? const [];
+  }
+
+  @override
+  Future<bool?> selectAudioRoute(int routeId) {
+    if (defaultTargetPlatform != TargetPlatform.android) return Future.value(false);
+    return _channel.invokeMethod('selectAudioRoute', <String, dynamic>{"routeId": routeId});
   }
 
   @override

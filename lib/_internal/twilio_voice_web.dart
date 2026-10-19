@@ -606,6 +606,18 @@ class Call extends MethodChannelTwilioCall {
     return Future.value(false);
   }
 
+  /// Not available for web
+  @override
+  Future<List<AudioRoute>> getAudioRoutes() {
+    return Future.value(const []);
+  }
+
+  /// Not available for web
+  @override
+  Future<bool?> selectAudioRoute(int routeId) {
+    return Future.value(false);
+  }
+
   /// Not currently implemented for web
   @override
   Future<bool?> toggleSpeaker(bool speakerIsOn) async {
