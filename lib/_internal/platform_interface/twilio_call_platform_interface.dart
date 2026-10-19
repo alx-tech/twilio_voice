@@ -75,6 +75,14 @@ abstract class TwilioCallPlatform extends SharedPlatformInterface {
   /// Query's bluetooth status, true if bluetooth is on.
   Future<bool?> isBluetoothOn();
 
+  /// Outputs the active call can use, each Bluetooth device listed by name (Android).
+  /// Empty where the platform owns routing (iOS CallKit) or there is no call.
+  Future<List<AudioRoute>> getAudioRoutes();
+
+  /// Sends the active call's audio to the route with [routeId] from [getAudioRoutes].
+  /// Applies to this call only.
+  Future<bool?> selectAudioRoute(int routeId);
+
   /// Send digits to active call
   Future<bool?> sendDigits(String digits);
 }

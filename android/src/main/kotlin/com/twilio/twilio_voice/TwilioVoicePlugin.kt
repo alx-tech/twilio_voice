@@ -16,6 +16,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import com.twilio.twilio_voice.audio.TVAudioManager
 import com.twilio.twilio_voice.constants.Constants
 import com.twilio.twilio_voice.constants.FlutterErrorCodes
 import com.twilio.twilio_voice.receivers.TVBroadcastReceiver
@@ -464,6 +465,25 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
             TVMethodChannels.IS_BLUETOOTH_ON -> {
                 Log.d(TAG, "isBluetoothOn invoked")
                 result.success(isBluetoothOn)
+            }
+
+            TVMethodChannels.GET_AUDIO_ROUTES -> {
+                val routes = context?.let { TVAudioManager.getInstance(it).availableRoutes() }.orEmpty()
+                result.success(routes.map {
+                    mapOf("id" to it.id, "name" to it.name, "type" to it.type, "isActive" to it.isActive)
+                })
+            }
+
+            TVMethodChannels.SELECT_AUDIO_ROUTE -> {
+                val routeId = call.argument<Int>("routeId") ?: run {
+                    result.error(
+                        FlutterErrorCodes.MALFORMED_ARGUMENTS,
+                        "No 'routeId' provided or invalid type",
+                        null
+                    )
+                    return@onMethodCall
+                }
+                result.success(context?.let { TVAudioManager.getInstance(it).selectRoute(routeId) } ?: false)
             }
 
             TVMethodChannels.TOGGLE_MUTE -> {
@@ -1225,6 +1245,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
             Log.d(TAG, "registerReceiver")
             val intentFilter = IntentFilter().apply {
                 addAction(TVBroadcastReceiver.ACTION_AUDIO_STATE)
+                addAction(TVBroadcastReceiver.ACTION_AUDIO_ROUTES_CHANGED)
                 addAction(TVBroadcastReceiver.ACTION_ACTIVE_CALL_CHANGED)
                 addAction(TVBroadcastReceiver.ACTION_INCOMING_CALL)
                 addAction(TVBroadcastReceiver.ACTION_CALL_ENDED)
@@ -1516,6 +1537,20 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                     logEvent("", if (it) "Bluetooth On" else "Bluetooth Off")
                 }
                 Log.d(TAG, "handleBroadcastIntent: Audio state changed, muted=$isMuted speaker=$isSpeakerOn bluetooth=$isBluetoothOn")
+            }
+
+            TVBroadcastReceiver.ACTION_AUDIO_ROUTES_CHANGED -> {
+                // A picked route or a lost headset can change speaker and Bluetooth without
+                // going through the connection, so the cached state is re-read here.
+                context?.let { TVAudioManager.getInstance(it) }?.let { audio ->
+                    isSpeakerOn = if (isSpeakerOn == audio.isSpeakerOn) isSpeakerOn else audio.isSpeakerOn.also {
+                        logEvent("", if (it) "Speaker On" else "Speaker Off")
+                    }
+                    isBluetoothOn = if (isBluetoothOn == audio.isBluetoothOn) isBluetoothOn else audio.isBluetoothOn.also {
+                        logEvent("", if (it) "Bluetooth On" else "Bluetooth Off")
+                    }
+                }
+                logEvent("", "Audio Routes Changed")
             }
 
             TVBroadcastReceiver.ACTION_ACTIVE_CALL_CHANGED -> {

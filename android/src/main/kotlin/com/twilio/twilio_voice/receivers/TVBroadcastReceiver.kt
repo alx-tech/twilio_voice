@@ -44,6 +44,12 @@ class TVBroadcastReceiver(private val plugin: TwilioVoicePlugin) : BroadcastRece
         const val ACTION_CALL_STATE: String = "com.twilio.ACTION_CALL_STATE"
 
         /**
+         * Action used to notify the call screens that the outputs a call can use changed: a
+         * device connected or disconnected, or the user picked a different one.
+         */
+        const val ACTION_AUDIO_ROUTES_CHANGED: String = "com.twilio.ACTION_AUDIO_ROUTES_CHANGED"
+
+        /**
          * Extra used with [ACTION_AUDIO_STATE], [ACTION_CALL_STATE] to indicate the new speakerphone state.
          */
         const val EXTRA_SPEAKER_STATE: String = "EXTRA_SPEAKER_STATE"

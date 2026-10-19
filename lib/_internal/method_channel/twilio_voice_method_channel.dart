@@ -432,6 +432,8 @@ class MethodChannelTwilioVoice extends TwilioVoicePlatform {
         return CallEvent.bluetoothOn;
       case 'Bluetooth Off':
         return CallEvent.bluetoothOff;
+      case 'Audio Routes Changed':
+        return CallEvent.audioRoutesChanged;
       case 'Reconnected':
         return CallEvent.reconnected;
       default:

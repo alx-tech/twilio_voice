@@ -269,7 +269,8 @@ class TVIncomingCallActivity : AppCompatActivity() {
     private fun refreshRouteControl() {
         val group = findViewById<View>(R.id.incall_route_group)
         val routes = TVAudioManager.getInstance(applicationContext).availableRoutes()
-        group.visibility = if (routes.size > 2) View.VISIBLE else View.GONE
+        // A phone with no earpiece lists only speaker + headset, which is still a real choice.
+        group.visibility = if (routes.any { it.type !in BUILT_IN_TYPES }) View.VISIBLE else View.GONE
         findViewById<View>(R.id.incall_route).setBackgroundResource(
             if (routes.any { it.isActive && it.type !in BUILT_IN_TYPES }) {
                 R.drawable.bg_circle_toggle_on
@@ -362,6 +363,12 @@ class TVIncomingCallActivity : AppCompatActivity() {
     private fun registerDismissReceiver() {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
+                if (intent.action == TVBroadcastReceiver.ACTION_AUDIO_ROUTES_CHANGED) {
+                    speakerOn = TVAudioManager.getInstance(applicationContext).isSpeakerOn
+                    updateAudioButtons()
+                    refreshRouteControl()
+                    return
+                }
                 if (intent.action == TVBroadcastReceiver.ACTION_AUDIO_STATE) {
                     muted = intent.getBooleanExtra(TVBroadcastReceiver.EXTRA_MUTE_STATE, muted)
                     speakerOn = intent.getBooleanExtra(TVBroadcastReceiver.EXTRA_SPEAKER_STATE, speakerOn)
@@ -384,6 +391,7 @@ class TVIncomingCallActivity : AppCompatActivity() {
             addAction(TVNativeCallEvents.EVENT_DISCONNECTED_LOCAL)
             addAction(TVNativeCallEvents.EVENT_DISCONNECTED_REMOTE)
             addAction(TVBroadcastReceiver.ACTION_AUDIO_STATE)
+            addAction(TVBroadcastReceiver.ACTION_AUDIO_ROUTES_CHANGED)
         }
         LocalBroadcastManager.getInstance(this).registerReceiver(receiver, filter)
     }

@@ -13,6 +13,10 @@ enum CallEvent {
   speakerOff,
   bluetoothOn,
   bluetoothOff,
+
+  /// The outputs the call can use changed (Android): a device connected or
+  /// disconnected, or a different one was picked. Re-read `getAudioRoutes`.
+  audioRoutesChanged,
   log,
   permission,
   declined,
