@@ -535,7 +535,7 @@ Deprecated in 0.10.0, as it is no longer needed. Custom UI has been replaced wit
 Similar to CallKit on iOS, Android implements their own via a [ConnectionService](https://developer.android.com/reference/android/telecom/ConnectionService) integration. To make use of this, you'll need to request `CALL_PHONE` permissions via:
 
 ```dart
-TwilioVoice.instance.requestCallPhonePermission();  // Gives Android permissions to place outgoing calls
+TwilioVoice.instance.requestCallPhonePermission();  // Not needed to place outgoing calls, which only need RECORD_AUDIO
 TwilioVoice.instance.requestReadPhoneStatePermission();  // Gives Android permissions to read Phone State including receiving calls
 TwilioVoice.instance.requestReadPhoneNumbersPermission();  // Gives Android permissions to read Phone Accounts
 TwilioVoice.instance.requestManageOwnCallsPermission();  // Gives Android permissions to manage calls, this isn't necessary to request as the permission is simply required in the Manifest, but added nontheless.
@@ -564,7 +564,7 @@ TwilioVoice.instance.isRejectingCallOnNoPermissions(); // Checks if the plugin i
 
 If the `CALL_PHONE` permissions group i.e. `READ_PHONE_STATE`, `READ_PHONE_NUMBERS`, `CALL_PHONE` aren't granted nor a Phone Account is registered and enabled, the plugin will either reject the incoming call (true) or not show the incoming call UI (false).
 
-_Note: If `MANAGE_OWN_CALLS` permission is not granted, outbound calls will not work._
+_Note: Outbound calls are placed through `Voice.connect`, not Telecom, so they only need `RECORD_AUDIO`. They do not need `CALL_PHONE`, `READ_PHONE_NUMBERS` or `MANAGE_OWN_CALLS`._
 
 See [Android Setup](#android-setup) and [Android Notes](https://github.com/cybex-dev/twilio_voice/blob/master/NOTES.md#android) for more information regarding configuring the `ConnectionService` and registering a Phone Account.
 
