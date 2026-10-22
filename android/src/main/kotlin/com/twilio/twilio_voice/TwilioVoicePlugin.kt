@@ -1057,11 +1057,11 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
 
     /**
      * Attempts to place a call using the [TVConnectionService].
-     * Requires permissions:
-     * - [Manifest.permission.READ_PHONE_NUMBERS]: for getting the phone account via the handle.
-     * - [Manifest.permission.RECORD_AUDIO]: for placing the call and capturing microphone audio.
+     * Requires [Manifest.permission.RECORD_AUDIO] only: the call goes through `Voice.connect`, not
+     * Telecom, so the phone-account permissions (READ_PHONE_NUMBERS, CALL_PHONE, MANAGE_OWN_CALLS)
+     * are not needed and the host app no longer requests them.
      */
-    @RequiresPermission(allOf = [Manifest.permission.READ_PHONE_NUMBERS, Manifest.permission.RECORD_AUDIO])
+    @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     private fun placeCall(
         ctx: Context,
         accessToken: String,
@@ -1076,18 +1076,6 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
 
         if (!checkMicrophonePermission()) {
             Log.e(TAG, "No microphone permission, call `requestMicrophonePermission()` first")
-            return false
-        }
-        if (!checkReadPhoneNumbersPermission()) {
-            Log.e(TAG, "No read phone state permission, call `requestReadPhoneStatePermission()` first")
-            return false
-        }
-        if (!checkCallPhonePermission()) {
-            Log.e(TAG, "No call phone permission, call `requestCallPhonePermission()` first")
-            return false
-        }
-        if (!checkManageOwnCallsPermission()) {
-            Log.e(TAG, "No manage own calls permission, call `requestManageOwnCallsPermission()` first")
             return false
         }
 
