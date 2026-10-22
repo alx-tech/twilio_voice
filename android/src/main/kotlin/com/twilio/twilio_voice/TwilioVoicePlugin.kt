@@ -1058,8 +1058,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
     /**
      * Attempts to place a call using the [TVConnectionService].
      * Requires [Manifest.permission.RECORD_AUDIO] only: the call goes through `Voice.connect`, not
-     * Telecom, so the phone-account permissions (READ_PHONE_NUMBERS, CALL_PHONE, MANAGE_OWN_CALLS)
-     * are not needed and the host app no longer requests them.
+     * Telecom, so no phone-account permission is needed.
      */
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     private fun placeCall(
