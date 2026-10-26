@@ -25,6 +25,7 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.twilio.twilio_voice.R
 import com.twilio.twilio_voice.audio.TVAudioManager
 import com.twilio.twilio_voice.receivers.TVBroadcastReceiver
+import com.twilio.twilio_voice.service.TVCallConnection
 import com.twilio.twilio_voice.service.TVConnectionService
 import com.twilio.twilio_voice.types.TVNativeCallActions
 import com.twilio.twilio_voice.types.TVNativeCallEvents
@@ -72,8 +73,10 @@ class TVIncomingCallActivity : AppCompatActivity() {
 
         buildKeypad()
         onBackPressedDispatcher.addCallback(this, keypadBackCallback)
-        // A recreated screen (rotation, process restore) carries the original Answer extra.
-        applyIntent(intent, allowAnswer = savedInstanceState == null)
+        // A recreated screen (rotation, process restore) and a launch from recents carry the
+        // original Answer extra, which by then belongs to a call that is over or answered.
+        val fromHistory = (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0
+        applyIntent(intent, allowAnswer = savedInstanceState == null && !fromHistory)
         registerDismissReceiver()
     }
 
@@ -150,6 +153,12 @@ class TVIncomingCallActivity : AppCompatActivity() {
         if (intent.getBooleanExtra(EXTRA_ANSWER, false)) {
             intent.removeExtra(EXTRA_ANSWER)
             if (allowAnswer && !inCall) acceptCall()
+        }
+
+        // A screen recreated during a live call must not show the ringing actions again.
+        val state = callHandle?.let { TVConnectionService.getConnection(it) }?.state
+        if (!inCall && (state == TVCallConnection.STATE_ACTIVE || state == TVCallConnection.STATE_HOLDING)) {
+            switchToInCall()
         }
     }
 

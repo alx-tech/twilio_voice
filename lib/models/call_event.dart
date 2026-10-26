@@ -23,7 +23,8 @@ enum CallEvent {
   /// call screen gives it back.
   microphoneSilenced,
 
-  /// Android: the call's microphone is live again after [microphoneSilenced].
+  /// Android: the call's microphone is live again after [microphoneSilenced]. Not sent
+  /// when the call ends while silenced; [callEnded] clears that state too.
   microphoneRestored,
   log,
   permission,

@@ -299,7 +299,14 @@ class TVConnectionService : Service(), TVAudioManager.RingAudioFocusListener, TV
     }
     //endregion
 
-    private var isInForeground: Boolean = false
+    /**
+     * Whether the ongoing-call notification is the foreground one. Stays false while ringing,
+     * so neither a refresh nor a reclaim replaces the ringing notification.
+     */
+    private var isOngoingForeground: Boolean = false
+
+    /** Whether the foreground service currently holds the `microphone` type. */
+    private var microphoneClaimed: Boolean = false
 
     private val audioStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -331,7 +338,7 @@ class TVConnectionService : Service(), TVAudioManager.RingAudioFocusListener, TV
 
     private fun refreshOngoingNotification() {
         // A CallStyle notification may only belong to a foreground service.
-        if (!hasActiveCalls() || !isInForeground) return
+        if (!hasActiveCalls() || !isOngoingForeground) return
         val notificationManager: NotificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(NOTIFICATION_ID_CALL, createNotification())
     }
@@ -352,9 +359,9 @@ class TVConnectionService : Service(), TVAudioManager.RingAudioFocusListener, TV
      * Posts the minimal ongoing-call notification, then immediately tears it down if idle.
      */
     private fun startForegroundThenStopIfIdle() {
-        // Reached from background FCM paths (e.g. a cancelled invite) with no call to carry, so
-        // never claim the microphone here.
-        startForegroundService(wantMicrophone = false)
+        // Reached from background FCM paths (a cancelled or auto-declined invite). With a live
+        // call it re-posts the service, and dropping `microphone` there would silence that call.
+        startForegroundService(wantMicrophone = hasActiveCalls() && microphoneClaimed)
         if (!hasActiveCalls()) {
             stopForegroundService()
             stopSelf()
@@ -503,7 +510,7 @@ class TVConnectionService : Service(), TVAudioManager.RingAudioFocusListener, TV
                 }
 
                 ACTION_RECLAIM_MICROPHONE -> {
-                    if (hasActiveCalls() && isInForeground) {
+                    if (hasActiveCalls() && isOngoingForeground) {
                         startForegroundService(wantMicrophone = true)
                     }
                 }
@@ -958,7 +965,9 @@ class TVConnectionService : Service(), TVAudioManager.RingAudioFocusListener, TV
             .setSmallIcon(R.drawable.ic_microphone)
             .setContentTitle(getString(R.string.call_microphone_silenced_title))
             .setContentText(getString(R.string.call_microphone_silenced_text))
-            .setCategory(Notification.CATEGORY_CALL)
+            // Not CATEGORY_CALL: with Do Not Disturb on, a call-category alert without a Person
+            // can be filtered out.
+            .setCategory(Notification.CATEGORY_ERROR)
             .setAutoCancel(true)
             .apply { callScreenPendingIntent(callHandle, connection, flag)?.let { setContentIntent(it) } }
             .build()
@@ -1013,10 +1022,12 @@ class TVConnectionService : Service(), TVAudioManager.RingAudioFocusListener, TV
     private fun startForegroundWithCallTypes(notification: Notification, wantMicrophone: Boolean) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             startForeground(NOTIFICATION_ID_CALL, notification)
+            microphoneClaimed = wantMicrophone
             return
         }
         if (!wantMicrophone) {
             startForeground(NOTIFICATION_ID_CALL, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL)
+            microphoneClaimed = false
             return
         }
         try {
@@ -1025,9 +1036,11 @@ class TVConnectionService : Service(), TVAudioManager.RingAudioFocusListener, TV
                 notification,
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
             )
+            microphoneClaimed = true
         } catch (e: Exception) {
             Log.e(TAG, "[VoiceConnectionService] microphone service type refused, continuing as phoneCall only: $e")
             startForeground(NOTIFICATION_ID_CALL, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL)
+            microphoneClaimed = false
         }
     }
 
@@ -1037,7 +1050,7 @@ class TVConnectionService : Service(), TVAudioManager.RingAudioFocusListener, TV
         Log.d(TAG, "[VoiceConnectionService] Starting foreground service")
         try {
             startForegroundWithCallTypes(notification, wantMicrophone)
-            isInForeground = true
+            isOngoingForeground = true
         } catch (e: Exception) {
             // Error, not warn: this is the failure that silently stops the phone ringing, and it
             // went unnoticed in production precisely because it was only logged at warn.
@@ -1048,7 +1061,8 @@ class TVConnectionService : Service(), TVAudioManager.RingAudioFocusListener, TV
     /// Source: https://github.com/react-native-webrtc/react-native-callkeep/blob/master/android/src/main/java/io/wazo/callkeep/VoiceConnectionService.java#L352C5-L377C6
     private fun stopForegroundService() {
         Log.d(TAG, "[VoiceConnectionService] stopForegroundService")
-        isInForeground = false
+        isOngoingForeground = false
+        microphoneClaimed = false
         try {
             // Takes flags, not a notification id. Without REMOVE the system keeps the CallStyle
             // notification as an ordinary one, which Android 12+ refuses and kills the app for.

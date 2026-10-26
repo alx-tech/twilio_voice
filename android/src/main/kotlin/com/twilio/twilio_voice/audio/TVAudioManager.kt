@@ -437,12 +437,10 @@ class TVAudioManager private constructor(context: Context) {
      * Resumes once the handset call is over, for the devices that never send the matching
      * `AUDIOFOCUS_GAIN`.
      *
-     * Only a call we actually saw take the handset counts. `MODE_IN_CALL` being absent is
-     * no evidence on its own: another VoIP app or a voice assistant takes the focus
-     * without ever setting it, and resuming on that would talk over them. So the mode has
-     * to be observed first, and if it never appears within
-     * [NATIVE_CALL_DETECT_WINDOW_MS] this was not a handset call and the gain callback is
-     * the only thing worth waiting for.
+     * Only a call we actually saw take the handset counts: another VoIP app or a voice
+     * assistant takes the focus without setting `MODE_IN_CALL`, and those leave the call
+     * live. The watchdog keeps polling while focus is lost, so a handset call answered
+     * after a long ring is still caught.
      *
      * Bounded by the call itself: [onCallEnded] cancels it.
      */
@@ -735,9 +733,9 @@ class TVAudioManager private constructor(context: Context) {
         private const val MICROPHONE_SILENCED_CHECKS = 3
 
         /**
-         * How long to keep looking for `MODE_IN_CALL` after losing focus before
-         * concluding the interruption was not a call on the handset. The telephony stack
-         * sets the mode within a second or so of taking the audio.
+         * How long after a permanent focus loss with no `MODE_IN_CALL` before trying to take
+         * the focus back. The telephony stack sets the mode within a second or so of taking
+         * the audio.
          */
         private const val NATIVE_CALL_DETECT_WINDOW_MS = 10_000L
 
