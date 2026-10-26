@@ -549,9 +549,16 @@ class TVAudioManager private constructor(context: Context) {
     private val microphoneWatchdog = object : Runnable {
         override fun run() {
             if (!isActive) return
-            // While another app or a handset call has the audio, a silenced microphone is
-            // expected and opening the call screen would not help.
-            val silenced = !focusLost && isCallRecordingSilenced()
+            // A held call and a short interruption (an assistant, a voice note) silence the
+            // microphone on purpose: the state is left as it is until they are over. After the
+            // window the rep is told, so a silent call behind another app is not missed.
+            val interrupted = suspended ||
+                (focusLost && SystemClock.elapsedRealtime() - focusLostAt < NATIVE_CALL_DETECT_WINDOW_MS)
+            if (interrupted) {
+                handler.postDelayed(this, MICROPHONE_CHECK_MS)
+                return
+            }
+            val silenced = isCallRecordingSilenced()
             if (silenced) {
                 silencedChecks++
                 if (!microphoneSilenced && silencedChecks >= MICROPHONE_SILENCED_CHECKS) {
@@ -727,15 +734,15 @@ class TVAudioManager private constructor(context: Context) {
         private const val NATIVE_CALL_POLL_MS = 2_000L
 
         /** How often to check that the system is not silencing the call's microphone. */
-        private const val MICROPHONE_CHECK_MS = 500L
+        private const val MICROPHONE_CHECK_MS = 1_000L
 
-        /** Consecutive silenced checks before the rep is told: 1.5 s rules out the claim at connect. */
-        private const val MICROPHONE_SILENCED_CHECKS = 3
+        /** Consecutive silenced checks before the rep is told: 2 s rules out the claim at connect. */
+        private const val MICROPHONE_SILENCED_CHECKS = 2
 
         /**
-         * How long after a permanent focus loss with no `MODE_IN_CALL` before trying to take
-         * the focus back. The telephony stack sets the mode within a second or so of taking
-         * the audio.
+         * How long after a focus loss with no `MODE_IN_CALL` before trying to take the focus
+         * back (permanent loss) and before reporting a silenced microphone again. The telephony
+         * stack sets the mode within a second or so of taking the audio.
          */
         private const val NATIVE_CALL_DETECT_WINDOW_MS = 10_000L
 

@@ -115,6 +115,9 @@ class TVConnectionService : Service(), TVAudioManager.RingAudioFocusListener, TV
          */
         const val ACTION_RECLAIM_MICROPHONE: String = "ACTION_RECLAIM_MICROPHONE"
 
+        /** Whether the push started this command with startForegroundService(). */
+        const val EXTRA_STARTED_IN_FOREGROUND: String = "EXTRA_STARTED_IN_FOREGROUND"
+
         /**
          * Action used to answer an incoming call connection.
          */
@@ -358,9 +361,11 @@ class TVConnectionService : Service(), TVAudioManager.RingAudioFocusListener, TV
      * before it can stop, or the system throws ForegroundServiceDidNotStartInTimeException.
      * Posts the minimal ongoing-call notification, then immediately tears it down if idle.
      */
-    private fun startForegroundThenStopIfIdle() {
-        // Reached from background FCM paths (a cancelled or auto-declined invite). With a live
-        // call it re-posts the service, and dropping `microphone` there would silence that call.
+    private fun startForegroundThenStopIfIdle(startedInForeground: Boolean = true) {
+        // Reached from background FCM paths (a cancelled or auto-declined invite). With a call
+        // already live the push used a plain start: the live call keeps its notification and its
+        // microphone type, so nothing is re-posted.
+        if (!startedInForeground && hasActiveCalls()) return
         startForegroundService(wantMicrophone = hasActiveCalls() && microphoneClaimed)
         if (!hasActiveCalls()) {
             stopForegroundService()
@@ -397,7 +402,7 @@ class TVConnectionService : Service(), TVAudioManager.RingAudioFocusListener, TV
                     it.setExtrasClassLoader(CallInvite::class.java.classLoader)
                     val cancelledCallInvite = it.getParcelableExtraSafe<CancelledCallInvite>(EXTRA_CANCEL_CALL_INVITE) ?: run {
                         Log.e(TAG, "onStartCommand: ACTION_CANCEL_CALL_INVITE is missing parcelable EXTRA_CANCEL_CALL_INVITE")
-                        startForegroundThenStopIfIdle()
+                        startForegroundThenStopIfIdle(it.getBooleanExtra(EXTRA_STARTED_IN_FOREGROUND, true))
                         return@let
                     }
 
@@ -412,7 +417,7 @@ class TVConnectionService : Service(), TVAudioManager.RingAudioFocusListener, TV
 
                     conn?.onAbort() ?: run {
                         Log.e(TAG, "onStartCommand: [ACTION_CANCEL_CALL_INVITE] could not find connection for callHandle: $callHandle")
-                        startForegroundThenStopIfIdle()
+                        startForegroundThenStopIfIdle(it.getBooleanExtra(EXTRA_STARTED_IN_FOREGROUND, true))
                     }
                 }
 
@@ -454,9 +459,9 @@ class TVConnectionService : Service(), TVAudioManager.RingAudioFocusListener, TV
                         // reaches Twilio (both land as `busy`), so say so on the way out — it
                         // is the only way to count how often this fires in production.
                         broadcastAutoDeclined(callInvite.callSid, declineReason)
-                        // Started via startForegroundService, so we must still reach
-                        // startForeground before stopping or the system kills the app.
-                        startForegroundThenStopIfIdle()
+                        // Started via startForegroundService (unless a call was already live),
+                        // so we must still reach startForeground or the system kills the app.
+                        startForegroundThenStopIfIdle(it.getBooleanExtra(EXTRA_STARTED_IN_FOREGROUND, true))
                         return@let
                     }
 
@@ -510,7 +515,7 @@ class TVConnectionService : Service(), TVAudioManager.RingAudioFocusListener, TV
                 }
 
                 ACTION_RECLAIM_MICROPHONE -> {
-                    if (hasActiveCalls() && isOngoingForeground) {
+                    if (hasActiveCalls() && isOngoingForeground && !microphoneClaimed) {
                         startForegroundService(wantMicrophone = true)
                     }
                 }
@@ -686,7 +691,7 @@ class TVConnectionService : Service(), TVAudioManager.RingAudioFocusListener, TV
 
                 else -> {
                     Log.e(TAG, "onStartCommand: unknown action: ${it.action}")
-                    startForegroundThenStopIfIdle()
+                    startForegroundThenStopIfIdle(it.getBooleanExtra(EXTRA_STARTED_IN_FOREGROUND, true))
                 }
             }
         } ?: run {
