@@ -7,6 +7,8 @@ import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.media.AudioRecordingConfiguration
+import android.media.MediaRecorder
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -24,9 +26,13 @@ import com.twilio.twilio_voice.receivers.TVBroadcastReceiver
  * would otherwise take the call silently, and a dead microphone is all anyone would see.
  *
  * Telecom also used to arbitrate between an app call and a call on the handset. It no
- * longer does, so [CallAudioFocusListener] carries that duty: losing audio focus — which
- * is what a cellular call arriving mid-call looks like from here — suspends the app call
- * instead of leaving two conversations fighting over the microphone.
+ * longer does, so [CallAudioFocusListener] carries that duty: once a call on the handset
+ * takes the audio, the app call is suspended instead of leaving two conversations fighting
+ * over the microphone. Any other app taking the focus leaves the call live.
+ *
+ * It also watches whether the system is silencing the call's microphone, which happens when
+ * the app is in the background without the microphone foreground-service type, and tells
+ * [MicrophoneListener] so the rep can be sent back to the call screen.
  */
 class TVAudioManager private constructor(context: Context) {
 
@@ -39,6 +45,12 @@ class TVAudioManager private constructor(context: Context) {
     interface CallAudioFocusListener {
         fun onAudioFocusLost()
         fun onAudioFocusRegained()
+    }
+
+    /** Told when the system starts and stops silencing the call's microphone. */
+    interface MicrophoneListener {
+        fun onMicrophoneSilenced()
+        fun onMicrophoneRestored()
     }
 
     /**
@@ -83,6 +95,13 @@ class TVAudioManager private constructor(context: Context) {
      */
     private var sawNativeCall: Boolean = false
 
+    /** Whether the call was actually held, which only a call on the handset does. */
+    private var suspended: Boolean = false
+
+    var microphoneListener: MicrophoneListener? = null
+    private var microphoneSilenced: Boolean = false
+    private var silencedChecks: Int = 0
+
     private var deviceCallback: AudioDeviceCallback? = null
 
     /**
@@ -116,6 +135,9 @@ class TVAudioManager private constructor(context: Context) {
         isBluetoothOn = false
         bluetoothDeviceId = null
         routeToHandset()
+        microphoneSilenced = false
+        silencedChecks = 0
+        handler.postDelayed(microphoneWatchdog, MICROPHONE_CHECK_MS)
     }
 
     fun onCallEnded() {
@@ -124,8 +146,11 @@ class TVAudioManager private constructor(context: Context) {
         focusLost = false
         focusLostPermanently = false
         sawNativeCall = false
+        suspended = false
         focusListener = null
         handler.removeCallbacks(nativeCallWatchdog)
+        handler.removeCallbacks(microphoneWatchdog)
+        microphoneSilenced = false
         unregisterDeviceCallback()
 
         // A call on the handset may still be running — this call may even have been
@@ -412,12 +437,10 @@ class TVAudioManager private constructor(context: Context) {
      * Resumes once the handset call is over, for the devices that never send the matching
      * `AUDIOFOCUS_GAIN`.
      *
-     * Only a call we actually saw take the handset counts. `MODE_IN_CALL` being absent is
-     * no evidence on its own: another VoIP app or a voice assistant takes the focus
-     * without ever setting it, and resuming on that would talk over them. So the mode has
-     * to be observed first, and if it never appears within
-     * [NATIVE_CALL_DETECT_WINDOW_MS] this was not a handset call and the gain callback is
-     * the only thing worth waiting for.
+     * Only a call we actually saw take the handset counts: another VoIP app or a voice
+     * assistant takes the focus without setting `MODE_IN_CALL`, and those leave the call
+     * live. The watchdog keeps polling while focus is lost, so a handset call answered
+     * after a long ring is still caught.
      *
      * Bounded by the call itself: [onCallEnded] cancels it.
      */
@@ -426,6 +449,7 @@ class TVAudioManager private constructor(context: Context) {
             if (!isActive || !focusLost) return
             if (isOnCellularCall()) {
                 sawNativeCall = true
+                suspendForNativeCall()
                 handler.postDelayed(this, NATIVE_CALL_POLL_MS)
                 return
             }
@@ -434,19 +458,15 @@ class TVAudioManager private constructor(context: Context) {
                 attemptResume()
                 return
             }
-            if (SystemClock.elapsedRealtime() - focusLostAt < NATIVE_CALL_DETECT_WINDOW_MS) {
-                // The telephony stack may not have set the mode yet; keep looking.
-                handler.postDelayed(this, NATIVE_CALL_POLL_MS)
-                return
-            }
-            if (focusLostPermanently) {
-                // Nothing will hand the focus back, so re-acquiring it is the only way
-                // out. attemptResume keeps the call suspended if that is refused.
+            if (focusLostPermanently && SystemClock.elapsedRealtime() - focusLostAt >= NATIVE_CALL_DETECT_WINDOW_MS) {
+                // Nothing will hand the focus back, so re-acquiring it is the only way out.
                 Log.i(TAG, "nativeCallWatchdog: permanent loss with no native call, trying to take focus back")
                 attemptResume()
                 return
             }
-            Log.i(TAG, "nativeCallWatchdog: not a native call, waiting for AUDIOFOCUS_GAIN instead")
+            // Another app has the focus, or a handset call is only ringing. The call stays
+            // live; keep watching in case the rep answers a handset call later.
+            handler.postDelayed(this, NATIVE_CALL_POLL_MS)
         }
     }
 
@@ -456,9 +476,19 @@ class TVAudioManager private constructor(context: Context) {
         focusLostPermanently = permanent
         focusLostAt = SystemClock.elapsedRealtime()
         sawNativeCall = isOnCellularCall()
-        Log.i(TAG, "handleFocusLost: lost audio focus (permanent=$permanent, nativeCall=$sawNativeCall), suspending the app call")
-        focusListener?.onAudioFocusLost()
+        Log.i(TAG, "handleFocusLost: lost audio focus (permanent=$permanent, nativeCall=$sawNativeCall)")
+        // Holding stops the audio both ways, so it is kept for a conversation on the handset.
+        // For a voice assistant, a voice note or a ringing handset the customer would hear
+        // nothing and hang up.
+        if (sawNativeCall) suspendForNativeCall()
         scheduleWatchdog()
+    }
+
+    private fun suspendForNativeCall() {
+        if (suspended) return
+        suspended = true
+        Log.i(TAG, "suspendForNativeCall: a call on the handset took the audio, suspending the app call")
+        focusListener?.onAudioFocusLost()
     }
 
     /**
@@ -502,8 +532,56 @@ class TVAudioManager private constructor(context: Context) {
         // The interruption set its own mode and output; both have to be claimed back.
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
         reapplyRoute()
-        Log.i(TAG, "attemptResume: audio focus is ours again, resuming the app call")
-        focusListener?.onAudioFocusRegained()
+        if (suspended) {
+            suspended = false
+            Log.i(TAG, "attemptResume: audio focus is ours again, resuming the app call")
+            focusListener?.onAudioFocusRegained()
+        }
+    }
+
+    /**
+     * Polls whether the system silences the call's recording.
+     *
+     * Polled, so a change of the silenced state alone is never missed. A short silence is
+     * normal while the microphone type is claimed at connect, so only a silence over several
+     * checks is reported.
+     */
+    private val microphoneWatchdog = object : Runnable {
+        override fun run() {
+            if (!isActive) return
+            // A held call and a short interruption (an assistant, a voice note) silence the
+            // microphone on purpose: the state is left as it is until they are over. After the
+            // window the rep is told, so a silent call behind another app is not missed.
+            val interrupted = suspended ||
+                (focusLost && SystemClock.elapsedRealtime() - focusLostAt < NATIVE_CALL_DETECT_WINDOW_MS)
+            if (interrupted) {
+                handler.postDelayed(this, MICROPHONE_CHECK_MS)
+                return
+            }
+            val silenced = isCallRecordingSilenced()
+            if (silenced) {
+                silencedChecks++
+                if (!microphoneSilenced && silencedChecks >= MICROPHONE_SILENCED_CHECKS) {
+                    microphoneSilenced = true
+                    microphoneListener?.onMicrophoneSilenced()
+                }
+            } else {
+                silencedChecks = 0
+                if (microphoneSilenced) {
+                    microphoneSilenced = false
+                    microphoneListener?.onMicrophoneRestored()
+                }
+            }
+            handler.postDelayed(this, MICROPHONE_CHECK_MS)
+        }
+    }
+
+    /** The call records with VOICE_COMMUNICATION; other sources are not the call. */
+    private fun isCallRecordingSilenced(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
+        return audioManager.activeRecordingConfigurations.any { config: AudioRecordingConfiguration ->
+            config.clientAudioSource == MediaRecorder.AudioSource.VOICE_COMMUNICATION && config.isClientSilenced
+        }
     }
 
     private fun scheduleWatchdog() {
@@ -655,10 +733,16 @@ class TVAudioManager private constructor(context: Context) {
         /** How often to re-check whether the handset call is over. */
         private const val NATIVE_CALL_POLL_MS = 2_000L
 
+        /** How often to check that the system is not silencing the call's microphone. */
+        private const val MICROPHONE_CHECK_MS = 1_000L
+
+        /** Consecutive silenced checks before the rep is told: 2 s rules out the claim at connect. */
+        private const val MICROPHONE_SILENCED_CHECKS = 2
+
         /**
-         * How long to keep looking for `MODE_IN_CALL` after losing focus before
-         * concluding the interruption was not a call on the handset. The telephony stack
-         * sets the mode within a second or so of taking the audio.
+         * How long after a focus loss with no `MODE_IN_CALL` before trying to take the focus
+         * back (permanent loss) and before reporting a silenced microphone again. The telephony
+         * stack sets the mode within a second or so of taking the audio.
          */
         private const val NATIVE_CALL_DETECT_WINDOW_MS = 10_000L
 

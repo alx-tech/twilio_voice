@@ -1233,6 +1233,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
             val intentFilter = IntentFilter().apply {
                 addAction(TVBroadcastReceiver.ACTION_AUDIO_STATE)
                 addAction(TVBroadcastReceiver.ACTION_AUDIO_ROUTES_CHANGED)
+                addAction(TVBroadcastReceiver.ACTION_MICROPHONE_STATE)
                 addAction(TVBroadcastReceiver.ACTION_ACTIVE_CALL_CHANGED)
                 addAction(TVBroadcastReceiver.ACTION_INCOMING_CALL)
                 addAction(TVBroadcastReceiver.ACTION_CALL_ENDED)
@@ -1538,6 +1539,11 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                     }
                 }
                 logEvent("", "Audio Routes Changed")
+            }
+
+            TVBroadcastReceiver.ACTION_MICROPHONE_STATE -> {
+                val silenced = intent.getBooleanExtra(TVBroadcastReceiver.EXTRA_MICROPHONE_SILENCED, false)
+                logEvent("", if (silenced) "Microphone Silenced" else "Microphone Restored")
             }
 
             TVBroadcastReceiver.ACTION_ACTIVE_CALL_CHANGED -> {

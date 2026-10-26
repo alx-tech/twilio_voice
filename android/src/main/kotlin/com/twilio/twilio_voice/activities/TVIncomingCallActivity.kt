@@ -25,6 +25,7 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.twilio.twilio_voice.R
 import com.twilio.twilio_voice.audio.TVAudioManager
 import com.twilio.twilio_voice.receivers.TVBroadcastReceiver
+import com.twilio.twilio_voice.service.TVCallConnection
 import com.twilio.twilio_voice.service.TVConnectionService
 import com.twilio.twilio_voice.types.TVNativeCallActions
 import com.twilio.twilio_voice.types.TVNativeCallEvents
@@ -34,6 +35,9 @@ class TVIncomingCallActivity : AppCompatActivity() {
     companion object {
         const val EXTRA_CALLER_DISPLAY_NAME: String = "EXTRA_CALLER_DISPLAY_NAME"
         const val EXTRA_IN_CALL: String = "EXTRA_IN_CALL"
+
+        /** Set by the notification's Answer action: accept the call as soon as the screen is up. */
+        const val EXTRA_ANSWER: String = "EXTRA_ANSWER"
 
         /** Outputs built into the handset; anything else counts as an external route. */
         private val BUILT_IN_TYPES: Set<Int> = setOf(
@@ -69,14 +73,24 @@ class TVIncomingCallActivity : AppCompatActivity() {
 
         buildKeypad()
         onBackPressedDispatcher.addCallback(this, keypadBackCallback)
-        applyIntent(intent)
+        // A recreated screen (rotation, process restore) and a launch from recents carry the
+        // original Answer extra, which by then belongs to a call that is over or answered.
+        val fromHistory = (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0
+        applyIntent(intent, allowAnswer = savedInstanceState == null && !fromHistory)
         registerDismissReceiver()
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        applyIntent(intent)
+        applyIntent(intent, allowAnswer = true)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // The app is in the foreground now, so the service may claim the microphone again
+        // if the system withheld it while the call was answered from the background.
+        if (inCall) startConnectionServiceAction(TVConnectionService.ACTION_RECLAIM_MICROPHONE)
     }
 
     override fun onDestroy() {
@@ -84,7 +98,7 @@ class TVIncomingCallActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    private fun applyIntent(intent: Intent) {
+    private fun applyIntent(intent: Intent, allowAnswer: Boolean) {
         callHandle = intent.getStringExtra(TVConnectionService.EXTRA_CALL_HANDLE)
         val callerDisplayName = intent.getStringExtra(EXTRA_CALLER_DISPLAY_NAME)?.takeIf { it.isNotBlank() }
 
@@ -92,14 +106,7 @@ class TVIncomingCallActivity : AppCompatActivity() {
             callerDisplayName ?: getString(R.string.unknown_caller)
         updateAvatar(callerDisplayName)
 
-        findViewById<View>(R.id.incoming_call_accept).setOnClickListener {
-            startConnectionServiceAction(TVConnectionService.ACTION_ANSWER)
-            // Switching immediately keeps the tap feeling instant, which is only safe
-            // because the service now broadcasts ACTION_CALL_ENDED when the invite has
-            // already gone — so a call answered a moment too late closes this screen
-            // instead of leaving a running timer with nothing behind it.
-            switchToInCall()
-        }
+        findViewById<View>(R.id.incoming_call_accept).setOnClickListener { acceptCall() }
 
         findViewById<View>(R.id.incoming_call_decline).setOnClickListener {
             startConnectionServiceAction(TVConnectionService.ACTION_REJECT)
@@ -142,6 +149,26 @@ class TVIncomingCallActivity : AppCompatActivity() {
         if (intent.getBooleanExtra(EXTRA_IN_CALL, false)) {
             switchToInCall()
         }
+
+        if (intent.getBooleanExtra(EXTRA_ANSWER, false)) {
+            intent.removeExtra(EXTRA_ANSWER)
+            if (allowAnswer && !inCall) acceptCall()
+        }
+
+        // A screen recreated during a live call must not show the ringing actions again.
+        val state = callHandle?.let { TVConnectionService.getConnection(it) }?.state
+        if (!inCall && (state == TVCallConnection.STATE_ACTIVE || state == TVCallConnection.STATE_HOLDING)) {
+            switchToInCall()
+        }
+    }
+
+    private fun acceptCall() {
+        startConnectionServiceAction(TVConnectionService.ACTION_ANSWER)
+        // Switching immediately keeps the tap feeling instant, which is only safe
+        // because the service now broadcasts ACTION_CALL_ENDED when the invite has
+        // already gone — so a call answered a moment too late closes this screen
+        // instead of leaving a running timer with nothing behind it.
+        switchToInCall()
     }
 
     private fun computeInitials(name: String?): String? {

@@ -14,4 +14,7 @@
     <string name="call_keypad_hide">Nascondi tastierino</string>
     <string name="call_end_call">Termina chiamata</string>
     <string name="call_missed_title">Chiamata persa</string>
+    <string name="call_alerts_channel">Avvisi di chiamata</string>
+    <string name="call_microphone_silenced_title">Il chiamante non ti sente</string>
+    <string name="call_microphone_silenced_text">Tocca per aprire la chiamata e riattivare il microfono.</string>
 </resources>

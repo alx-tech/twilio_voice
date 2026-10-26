@@ -17,4 +17,7 @@
     <string name="call_keypad_hide">Hide keypad</string>
     <string name="call_end_call">End call</string>
     <string name="call_missed_title">Missed call</string>
+    <string name="call_alerts_channel">Call alerts</string>
+    <string name="call_microphone_silenced_title">The caller cannot hear you</string>
+    <string name="call_microphone_silenced_text">Tap to open the call and restore your microphone.</string>
 </resources>

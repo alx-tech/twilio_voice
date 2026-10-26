@@ -12,4 +12,7 @@
     <string name="call_keypad_hide">Ukryj klawiaturę</string>
     <string name="call_end_call">Zakończ połączenie</string>
     <string name="call_missed_title">Nieodebrane połączenie</string>
+    <string name="call_alerts_channel">Alerty połączeń</string>
+    <string name="call_microphone_silenced_title">Rozmówca Cię nie słyszy</string>
+    <string name="call_microphone_silenced_text">Dotknij, aby otworzyć połączenie i przywrócić mikrofon.</string>
 </resources>

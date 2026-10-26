@@ -109,11 +109,7 @@ class VoiceFirebaseMessagingService : FirebaseMessagingService(), MessageListene
         Intent(applicationContext, TVConnectionService::class.java).apply {
             action = TVConnectionService.ACTION_INCOMING_CALL
             putExtra(TVConnectionService.EXTRA_INCOMING_CALL_INVITE, callInvite)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                applicationContext.startForegroundService(this) // Ensure it's started as a foreground service
-            } else {
-                applicationContext.startService(this)
-            }
+            startConnectionService(this)
         }
 
         // send broadcast to TVBroadcastReceiver, we notify Flutter about incoming call
@@ -125,16 +121,27 @@ class VoiceFirebaseMessagingService : FirebaseMessagingService(), MessageListene
         }
     }
 
+    /**
+     * With a call already live the service is in the foreground, so a plain start is allowed
+     * and needs no second startForeground: that would replace the call's notification and
+     * could drop its microphone type. Otherwise the service must start in the foreground.
+     */
+    private fun startConnectionService(intent: Intent) {
+        val alreadyForeground = TVConnectionService.hasActiveCalls()
+        intent.putExtra(TVConnectionService.EXTRA_STARTED_IN_FOREGROUND, !alreadyForeground)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !alreadyForeground) {
+            applicationContext.startForegroundService(intent)
+        } else {
+            applicationContext.startService(intent)
+        }
+    }
+
     override fun onCancelledCallInvite(cancelledCallInvite: CancelledCallInvite, callException: CallException?) {
         Log.d(TAG, "onCancelledCallInvite: ", callException)
         Intent(applicationContext, TVConnectionService::class.java).apply {
             action = TVConnectionService.ACTION_CANCEL_CALL_INVITE
             putExtra(TVConnectionService.EXTRA_CANCEL_CALL_INVITE, cancelledCallInvite)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                applicationContext.startForegroundService(this) // Ensure it's started as a foreground service
-            } else {
-                applicationContext.startService(this)
-            }
+            startConnectionService(this)
         }
     }
     //endregion
