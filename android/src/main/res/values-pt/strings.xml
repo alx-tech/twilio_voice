@@ -12,4 +12,7 @@
     <string name="call_keypad_hide">Ocultar teclado</string>
     <string name="call_end_call">Terminar chamada</string>
     <string name="call_missed_title">Chamada perdida</string>
+    <string name="call_alerts_channel">Alertas de chamada</string>
+    <string name="call_microphone_silenced_title">O cliente não o ouve</string>
+    <string name="call_microphone_silenced_text">Toque para abrir a chamada e recuperar o microfone.</string>
 </resources>

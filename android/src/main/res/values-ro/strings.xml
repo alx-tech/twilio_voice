@@ -12,4 +12,7 @@
     <string name="call_keypad_hide">Ascunde tastatura</string>
     <string name="call_end_call">Încheie apelul</string>
     <string name="call_missed_title">Apel pierdut</string>
+    <string name="call_alerts_channel">Alerte de apel</string>
+    <string name="call_microphone_silenced_title">Apelantul nu vă aude</string>
+    <string name="call_microphone_silenced_text">Atingeți pentru a deschide apelul și a reactiva microfonul.</string>
 </resources>

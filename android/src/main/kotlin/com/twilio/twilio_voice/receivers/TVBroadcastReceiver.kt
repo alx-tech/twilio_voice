@@ -50,6 +50,15 @@ class TVBroadcastReceiver(private val plugin: TwilioVoicePlugin) : BroadcastRece
         const val ACTION_AUDIO_ROUTES_CHANGED: String = "com.twilio.ACTION_AUDIO_ROUTES_CHANGED"
 
         /**
+         * Action used when the system starts or stops silencing the call's microphone, with
+         * [EXTRA_MICROPHONE_SILENCED].
+         */
+        const val ACTION_MICROPHONE_STATE: String = "com.twilio.ACTION_MICROPHONE_STATE"
+
+        /** Extra used with [ACTION_MICROPHONE_STATE]: true while the microphone is silenced. */
+        const val EXTRA_MICROPHONE_SILENCED: String = "EXTRA_MICROPHONE_SILENCED"
+
+        /**
          * Extra used with [ACTION_AUDIO_STATE], [ACTION_CALL_STATE] to indicate the new speakerphone state.
          */
         const val EXTRA_SPEAKER_STATE: String = "EXTRA_SPEAKER_STATE"

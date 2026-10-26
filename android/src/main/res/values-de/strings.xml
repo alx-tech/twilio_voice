@@ -2,4 +2,7 @@
 <resources>
     <string name="cancel">Stornieren</string>
     <string name="proceed">Fortfahren</string>
+    <string name="call_alerts_channel">Anrufhinweise</string>
+    <string name="call_microphone_silenced_title">Der Anrufer hört Sie nicht</string>
+    <string name="call_microphone_silenced_text">Tippen Sie, um den Anruf zu öffnen und Ihr Mikrofon wiederherzustellen.</string>
 </resources>

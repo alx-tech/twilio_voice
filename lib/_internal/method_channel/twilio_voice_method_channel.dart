@@ -434,6 +434,10 @@ class MethodChannelTwilioVoice extends TwilioVoicePlatform {
         return CallEvent.bluetoothOff;
       case 'Audio Routes Changed':
         return CallEvent.audioRoutesChanged;
+      case 'Microphone Silenced':
+        return CallEvent.microphoneSilenced;
+      case 'Microphone Restored':
+        return CallEvent.microphoneRestored;
       case 'Reconnected':
         return CallEvent.reconnected;
       default:

@@ -12,4 +12,7 @@
     <string name="call_keypad_hide">Masquer le clavier</string>
     <string name="call_end_call">Raccrocher</string>
     <string name="call_missed_title">Appel manqué</string>
+    <string name="call_alerts_channel">Alertes d\'appel</string>
+    <string name="call_microphone_silenced_title">Votre correspondant ne vous entend pas</string>
+    <string name="call_microphone_silenced_text">Touchez pour ouvrir l\'appel et rétablir votre micro.</string>
 </resources>
