@@ -29,6 +29,8 @@ public class SwiftTwilioVoicePlugin: NSObject, FlutterPlugin,  FlutterStreamHand
     let kCachedDeviceToken = "CachedDeviceToken"
     let kCachedBindingDate = "CachedBindingDate"
     let kClientList = "TwilioContactList"
+    // Same custom parameter the Android side reads (TVParameters.PARAM_CALLER_NAME).
+    let kCallerNameParam = "__TWI_CALLER_NAME"
     private var clients: [String:String]!
     
     var accessToken:String?
@@ -641,7 +643,8 @@ public class SwiftTwilioVoicePlugin: NSObject, FlutterPlugin,  FlutterStreamHand
         from = from.replacingOccurrences(of: "client:", with: "")
         
         self.sendPhoneCallEvents(description: "Ringing|\(from)|\(callInvite.to)|Incoming\(formatCustomParams(params: callInvite.customParameters))", isError: false)
-        reportIncomingCall(from: from, uuid: callInvite.uuid)
+        let callerName = callInvite.customParameters?[kCallerNameParam]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        reportIncomingCall(from: from, callerName: callerName?.isEmpty == false ? callerName : nil, uuid: callInvite.uuid)
         self.callInvite = callInvite
     }
     
@@ -974,15 +977,19 @@ public class SwiftTwilioVoicePlugin: NSObject, FlutterPlugin,  FlutterStreamHand
         }
     }
 
-    func reportIncomingCall(from: String, uuid: UUID) {
+    /// `callerName` is the server-sent display name; the handle stays the number so
+    /// the system call log can still call back.
+    func reportIncomingCall(from: String, callerName displayName: String? = nil, uuid: UUID) {
         let callHandle = CXHandle(type: .generic, value: from)
 
-        var callerName: String?;
-        if(from.contains("client:")) {
-            var clientName = from.replacingOccurrences(of: "client:", with: "")
-            callerName = self.clients[clientName];
-        } else {
-            callerName = from
+        var callerName: String? = displayName
+        if callerName == nil {
+            if(from.contains("client:")) {
+                let clientName = from.replacingOccurrences(of: "client:", with: "")
+                callerName = self.clients[clientName];
+            } else {
+                callerName = from
+            }
         }
 
         let callUpdate = CXCallUpdate()
