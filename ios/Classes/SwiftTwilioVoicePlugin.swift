@@ -79,6 +79,7 @@ public class SwiftTwilioVoicePlugin: NSObject, FlutterPlugin,  FlutterStreamHand
         
         //super.init(coder: aDecoder)
         super.init()
+        TwilioVoiceSDK.audioDevice = audioDevice
         callObserver.setDelegate(self, queue: DispatchQueue.main)
         
         callKitProvider.setDelegate(self, queue: nil)
@@ -837,6 +838,12 @@ public class SwiftTwilioVoicePlugin: NSObject, FlutterPlugin,  FlutterStreamHand
         audioDevice.block()
     }
 
+    // CallKit owns the audio session: the SDK must not start audio before didActivate.
+    private func holdAudioUntilCallKitActivatesSession() {
+        audioDevice.isEnabled = false
+        audioDevice.block()
+    }
+
     // MARK: CXProviderDelegate
     public func providerDidReset(_ provider: CXProvider) {
         self.sendPhoneCallEvents(description: "LOG|providerDidReset:", isError: false)
@@ -864,7 +871,7 @@ public class SwiftTwilioVoicePlugin: NSObject, FlutterPlugin,  FlutterStreamHand
     public func provider(_ provider: CXProvider, perform action: CXStartCallAction) {
         self.sendPhoneCallEvents(description: "LOG|provider:performStartCallAction:", isError: false)
 
-
+        holdAudioUntilCallKitActivatesSession()
         provider.reportOutgoingCall(with: action.callUUID, startedConnectingAt: Date())
 
         self.performVoiceCall(uuid: action.callUUID, client: "") { (success) in
@@ -881,7 +888,7 @@ public class SwiftTwilioVoicePlugin: NSObject, FlutterPlugin,  FlutterStreamHand
     public func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
         self.sendPhoneCallEvents(description: "LOG|provider:performAnswerCallAction:", isError: false)
 
-
+        holdAudioUntilCallKitActivatesSession()
         self.performAnswerVoiceCall(uuid: action.callUUID) { (success) in
             if success {
                 self.sendPhoneCallEvents(description: "LOG|provider:performAnswerVoiceCall() successful", isError: false)
