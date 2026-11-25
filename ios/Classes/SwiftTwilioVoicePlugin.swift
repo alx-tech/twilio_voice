@@ -89,16 +89,6 @@ public class SwiftTwilioVoicePlugin: NSObject, FlutterPlugin,  FlutterStreamHand
         voipRegistry.desiredPushTypes = Set([PKPushType.voIP])
         
         UNUserNotificationCenter.current().delegate = self
-
-        let appDelegate = UIApplication.shared.delegate
-        guard let controller = appDelegate?.window??.rootViewController as? FlutterViewController else {
-            fatalError("rootViewController is not type FlutterViewController")
-        }
-        let registrar = controller.registrar(forPlugin: "twilio_voice")
-        if let unwrappedRegistrar = registrar {
-            let eventChannel = FlutterEventChannel(name: "twilio_voice/events", binaryMessenger: unwrappedRegistrar.messenger())
-            eventChannel.setStreamHandler(self)
-        }
     }
     
     
@@ -442,7 +432,7 @@ public class SwiftTwilioVoicePlugin: NSObject, FlutterPlugin,  FlutterStreamHand
                                                                 //self.stopSpin()
                                                               })
                     alertController.addAction(cancel)
-                    guard let currentViewController = UIApplication.shared.keyWindow?.topMostViewController() else {
+                    guard let currentViewController = UIApplication.shared.activeKeyWindow?.topMostViewController() else {
                         return
                     }
                     currentViewController.present(alertController, animated: true, completion: nil)
@@ -1147,6 +1137,14 @@ public class SwiftTwilioVoicePlugin: NSObject, FlutterPlugin,  FlutterStreamHand
         }
     }
     
+}
+
+extension UIApplication {
+    var activeKeyWindow: UIWindow? {
+        let scenes = connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        return scene?.windows.first { $0.isKeyWindow } ?? scene?.windows.first
+    }
 }
 
 extension UIWindow {
